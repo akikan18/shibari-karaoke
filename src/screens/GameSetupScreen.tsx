@@ -1,44 +1,104 @@
-// src/screens/GameSetupScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
-// --- モックデータ ---
-const MOCK_MEMBERS = [
-  { id: '1', name: 'YAMADA', avatar: '🎤', isReady: true },
-  { id: '2', name: 'SUZUKI', avatar: '🎸', isReady: true },
-  { id: '3', name: 'TANAKA', avatar: '🎹', isReady: false },
-  { id: '4', name: 'SATO', avatar: '🥁', isReady: true },
-];
+// --- Firebase Imports ---
+import { doc, onSnapshot, updateDoc, arrayRemove, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 export const GameSetupScreen = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   
-  const gameMode = location.state?.mode || 'standard';
-  const [members, setMembers] = useState(MOCK_MEMBERS);
+  // State
+  const [members, setMembers] = useState<any[]>([]); // メンバーリスト
+  const [roomId, setRoomId] = useState<string>('');
   const [isHost, setIsHost] = useState(false);
+  const [userId, setUserId] = useState('');
+  const [gameMode, setGameMode] = useState<'standard' | 'free'>('standard');
   const [showLeaveModal, setShowLeaveModal] = useState(false);
 
+  // --- 初期化 & リアルタイム監視 ---
   useEffect(() => {
+    // 1. ローカル情報取得
     const stored = localStorage.getItem('shibari_user_info');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      setIsHost(parsed.isHost);
+    if (!stored) {
+      navigate('/');
+      return;
     }
-  }, []);
+    const userInfo = JSON.parse(stored);
+    setRoomId(userInfo.roomId);
+    setIsHost(userInfo.isHost);
+    setUserId(userInfo.userId);
 
-  const handleStart = () => {
-    console.log("Start button clicked, mode:", gameMode);
-    if (gameMode === 'free') {
-      navigate('/free');
-    } else {
-      navigate('/game-play');
+    // 2. Firestore監視 (部屋の情報をリアルタイム取得)
+    const roomRef = doc(db, "rooms", userInfo.roomId);
+    
+    const unsubscribe = onSnapshot(roomRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // メンバーリスト更新
+        setMembers(data.members || []);
+        
+        // ゲームモード同期
+        if (data.mode) {
+          setGameMode(data.mode);
+        }
+
+        // ゲーム開始判定 (status が playing になったら遷移)
+        if (data.status === 'playing') {
+          if (data.mode === 'free') {
+            navigate('/free');
+          } else {
+            navigate('/game-play'); // 通常モード
+          }
+        }
+      } else {
+        // 部屋が削除された場合 (ホストが解散した等)
+        alert("ルームが解散されました");
+        localStorage.removeItem('shibari_user_info');
+        navigate('/');
+      }
+    });
+
+    // クリーンアップ (監視解除)
+    return () => unsubscribe();
+  }, [navigate]);
+
+  // --- ゲーム開始 (Host Only) ---
+  const handleStart = async () => {
+    if (!roomId) return;
+    try {
+      // ステータスを更新して全員を遷移させる
+      const roomRef = doc(db, "rooms", roomId);
+      await updateDoc(roomRef, { status: 'playing' });
+    } catch (error) {
+      console.error("Error starting game:", error);
     }
   };
 
-  const handleLeaveConfirm = () => {
-    navigate('/');
+  // --- 退出処理 ---
+  const handleLeaveConfirm = async () => {
+    try {
+      const roomRef = doc(db, "rooms", roomId);
+
+      if (isHost) {
+        // ホストなら部屋削除
+        await deleteDoc(roomRef);
+      } else {
+        // ゲストならメンバーリストから自分を削除
+        // (自分と同じIDを持つオブジェクトを探して削除する必要がありますが、
+        //  FirestoreのarrayRemoveは完全一致が必要なので、members配列全体を書き換えます)
+        const newMembers = members.filter(m => m.id !== userId);
+        await updateDoc(roomRef, { members: newMembers });
+      }
+      
+      localStorage.removeItem('shibari_user_info');
+      navigate('/');
+    } catch (error) {
+      console.error("Error leaving room:", error);
+      navigate('/');
+    }
   };
 
   const handleChangeMode = () => {
@@ -46,10 +106,9 @@ export const GameSetupScreen = () => {
   };
 
   return (
-    // Layoutの背景が見えるようにtransparent指定
     <div className="w-full h-screen flex flex-col items-center relative overflow-hidden">
       
-      {/* 背景エフェクト: 少し薄くしてLayoutと馴染ませる */}
+      {/* 背景エフェクト */}
       <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
         <div className={`absolute top-[-20%] right-[-10%] w-[60vw] h-[60vw] blur-[120px] rounded-full mix-blend-screen opacity-40 animate-pulse ${gameMode === 'free' ? 'bg-blue-900' : 'bg-cyan-900'}`}></div>
       </div>
@@ -65,7 +124,7 @@ export const GameSetupScreen = () => {
             
             <div className="flex flex-wrap items-center gap-3 mt-4">
               <span className="px-3 py-1 rounded bg-white/10 border border-white/20 text-xs font-mono tracking-widest text-cyan-300">
-                ID: 8891
+                ID: {roomId}
               </span>
 
               {/* モード表示 */}
@@ -104,7 +163,7 @@ export const GameSetupScreen = () => {
           </button>
         </div>
 
-        {/* メンバーリスト */}
+        {/* メンバーリスト (Firestoreから取得したデータを表示) */}
         <div className="flex-1 overflow-y-auto mb-8 pr-2 custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence>
@@ -122,14 +181,15 @@ export const GameSetupScreen = () => {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-lg text-white tracking-wider">{member.name}</span>
-                      {index === 0 && <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-1.5 py-0.5 rounded border border-yellow-500/30">HOST</span>}
+                      {member.isHost && <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-1.5 py-0.5 rounded border border-yellow-500/30">HOST</span>}
                     </div>
                     <p className="text-xs text-white/30 font-mono tracking-widest">READY</p>
                   </div>
                 </motion.div>
               ))}
               
-              {[...Array(2)].map((_, i) => (
+              {/* 空きスロット演出 */}
+              {[...Array(Math.max(0, 4 - members.length))].map((_, i) => (
                 <div key={`empty-${i}`} className="border border-white/5 rounded-xl p-4 flex items-center gap-4 opacity-30 border-dashed">
                   <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl animate-pulse">?</div>
                   <p className="text-sm font-mono tracking-widest text-white/50">WAITING...</p>
@@ -140,11 +200,10 @@ export const GameSetupScreen = () => {
         </div>
 
         {/* フッターアクション */}
-        {/* Z-indexを上げて確実にクリックできるようにする */}
         <div className="h-24 flex items-center justify-center relative z-50">
           {isHost ? (
             <button 
-              type="button" // 明示的にtypeを指定
+              type="button"
               onClick={handleStart}
               className={`
                 group relative px-12 py-4 rounded-full font-black text-xl tracking-[0.2em] transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(6,182,212,0.3)]

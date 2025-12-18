@@ -1,7 +1,10 @@
-// src/screens/MenuScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// --- Firebase Imports ---
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.15, delayChildren: 0.2 } } };
 const itemVariants = { hidden: { y: 20, opacity: 0, scale: 0.95 }, show: { y: 0, opacity: 1, scale: 1, transition: { type: "spring", stiffness: 100 } } };
@@ -9,14 +12,57 @@ const itemVariants = { hidden: { y: 20, opacity: 0, scale: 0.95 }, show: { y: 0,
 export const MenuScreen = () => {
   const navigate = useNavigate();
   const [showExitModal, setShowExitModal] = useState(false);
-  const roomId = "8891"; 
+  const [roomId, setRoomId] = useState<string>("----");
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleExitConfirm = () => navigate('/');
+  // --- ローカルストレージからルームIDを取得 ---
+  useEffect(() => {
+    const stored = localStorage.getItem('shibari_user_info');
+    if (stored) {
+      const { roomId } = JSON.parse(stored);
+      setRoomId(roomId);
+    } else {
+      navigate('/'); // データがない場合はタイトルへ
+    }
+  }, [navigate]);
+
+  // --- モード選択時の処理 (Firestore更新) ---
+  const handleSelectMode = async (mode: 'standard' | 'free') => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      // DB上のモードを更新
+      const roomRef = doc(db, "rooms", roomId);
+      await updateDoc(roomRef, { mode: mode });
+      
+      // 待機画面へ遷移
+      navigate('/game-setup');
+    } catch (error) {
+      console.error("Error updating mode:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  // --- 解散処理 (Firestore削除) ---
+  const handleExitConfirm = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const roomRef = doc(db, "rooms", roomId);
+      await deleteDoc(roomRef); // 部屋を削除
+      
+      localStorage.removeItem('shibari_user_info');
+      navigate('/');
+    } catch (error) {
+      console.error("Error deleting room:", error);
+      navigate('/');
+    }
+  };
 
   return (
     <div className="w-full min-h-[80vh] flex flex-col items-center relative">
       
-      {/* ★修正: スマホで見やすい位置に調整 (中央寄せ・少し下に配置) */}
+      {/* スマホで見やすい位置に調整 */}
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -39,9 +85,9 @@ export const MenuScreen = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl px-4">
           
-          {/* 1. Game Mode: 通常通り待機画面へ */}
+          {/* 1. Game Mode: Firestoreを更新して遷移 */}
           <MenuCard 
-            onClick={() => navigate('/game-setup', { state: { mode: 'standard' } })}
+            onClick={() => handleSelectMode('standard')}
             title="GAME MODE"
             subtitle="みんなで縛りカラオケ"
             description="参加者を登録して、順番にお題をクリアしていくメインモードです。"
@@ -49,9 +95,9 @@ export const MenuScreen = () => {
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>}
           />
 
-          {/* 2. Free Mode: ★修正 こちらも待機画面を経由させる (stateでモードを渡す) */}
+          {/* 2. Free Mode: Firestoreを更新して遷移 */}
           <MenuCard 
-            onClick={() => navigate('/game-setup', { state: { mode: 'free' } })}
+            onClick={() => handleSelectMode('free')}
             title="FREE MODE"
             subtitle="単発お題ガチャ"
             description="スコアを気にせず、ランダムにお題を出して遊びたい時はこちら。"
@@ -87,6 +133,7 @@ export const MenuScreen = () => {
   );
 };
 
+// UIコンポーネント (そのまま)
 const MenuCard = ({ onClick, title, subtitle, description, icon, color }: any) => {
   const colorClasses: Record<string, string> = { cyan: "group-hover:border-cyan-500/50 group-hover:shadow-[0_0_50px_rgba(6,182,212,0.2)]", blue: "group-hover:border-blue-500/50 group-hover:shadow-[0_0_50px_rgba(59,130,246,0.2)]" };
   const iconColors: Record<string, string> = { cyan: "text-cyan-400 group-hover:text-cyan-300", blue: "text-blue-400 group-hover:text-blue-300" };

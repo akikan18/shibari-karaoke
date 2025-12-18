@@ -3,9 +3,14 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
+// --- Firebase Imports ---
+import { signInAnonymously } from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+
 const AVATARS = ['🎤', '🎸', '🎹', '🥁', '🎷', '🎧', '👑', '🎩', '🐶', '🐱', '🦁', '🐼', '🐯', '👽', '👻', '🤖'];
 
-// --- アニメーション設定 ---
+// --- アニメーション設定 (そのまま) ---
 const containerVariants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.3, delayChildren: 0.5 } },
@@ -26,32 +31,129 @@ const cardVariants = {
 export const EntranceScreen = () => {
   const navigate = useNavigate();
   
+  // UI State
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // 処理中フラグ
+
+  // Navigation & Mode State
   const [targetPath, setTargetPath] = useState<string>(''); 
   const [isHostMode, setIsHostMode] = useState(false); 
 
+  // User Data State
   const [userName, setUserName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
+  const [roomIdInput, setRoomIdInput] = useState(''); // ゲスト用入力ID
 
+  // --- ヘルパー関数: ランダムなRoom ID生成 ---
+  const generateRoomId = () => Math.floor(1000 + Math.random() * 9000).toString();
+
+  // --- 開始ボタンクリック（モーダルを開く前） ---
   const handleStartClick = (e: React.MouseEvent, path: string, isHost: boolean) => {
-    e.preventDefault(); 
+    e.preventDefault();
+    
+    // ゲスト参加なのにRoomIDが空の場合は弾く
+    if (!isHost && !roomIdInput.trim()) {
+      alert("Please enter a Room ID");
+      return;
+    }
+
     setTargetPath(path);
     setIsHostMode(isHost);
     setShowProfileModal(true);
   };
 
-  const handleConfirmProfile = (e: React.MouseEvent) => {
+  // --- プロフィール確定 & Firebase処理 ---
+  const handleConfirmProfile = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!userName.trim()) return;
+    if (isProcessing) return; // 連打防止
 
-    const userInfo = {
-      name: userName,
-      avatar: selectedAvatar,
-      isHost: isHostMode
-    };
-    localStorage.setItem('shibari_user_info', JSON.stringify(userInfo));
+    setIsProcessing(true);
 
-    navigate(targetPath);
+    try {
+      // 1. 匿名ログイン (ホスト・ゲスト共通)
+      const userCredential = await signInAnonymously(auth);
+      const userId = userCredential.user.uid;
+      let finalRoomId = roomIdInput;
+
+      if (isHostMode) {
+        // --- HOST: ルーム作成処理 ---
+        
+        // ユニークなIDを生成
+        let isUnique = false;
+        while (!isUnique) {
+          finalRoomId = generateRoomId();
+          const roomRef = doc(db, "rooms", finalRoomId);
+          const roomSnap = await getDoc(roomRef);
+          if (!roomSnap.exists()) isUnique = true;
+        }
+
+        // 初期メンバーデータ
+        const hostMember = {
+          id: userId,
+          name: userName,
+          avatar: selectedAvatar,
+          isHost: true,
+          isReady: true,
+          joinedAt: Date.now()
+        };
+
+        // Firestoreに保存
+        await setDoc(doc(db, "rooms", finalRoomId), {
+          roomId: finalRoomId,
+          hostId: userId,
+          status: 'waiting',
+          mode: 'standard',
+          createdAt: serverTimestamp(),
+          members: [hostMember]
+        });
+
+      } else {
+        // --- GUEST: ルーム参加処理 ---
+
+        const roomRef = doc(db, "rooms", finalRoomId);
+        const roomSnap = await getDoc(roomRef);
+
+        if (!roomSnap.exists()) {
+          alert("Room not found! IDを確認してください。");
+          setIsProcessing(false);
+          return;
+        }
+
+        // メンバー追加
+        const newMember = {
+          id: userId,
+          name: userName,
+          avatar: selectedAvatar,
+          isHost: false,
+          isReady: false,
+          joinedAt: Date.now()
+        };
+
+        await updateDoc(roomRef, {
+          members: arrayUnion(newMember)
+        });
+      }
+
+      // 2. ローカル保存 (アプリ内で使い回す情報)
+      const userInfo = {
+        userId: userId,
+        name: userName,
+        avatar: selectedAvatar,
+        isHost: isHostMode,
+        roomId: finalRoomId
+      };
+      localStorage.setItem('shibari_user_info', JSON.stringify(userInfo));
+
+      // 3. 画面遷移
+      navigate(targetPath);
+
+    } catch (error) {
+      console.error("Error:", error);
+      alert("エラーが発生しました。もう一度お試しください。");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -103,7 +205,9 @@ export const EntranceScreen = () => {
                 </label>
                 <input 
                   type="text" 
-                  placeholder="0000" 
+                  placeholder="0000"
+                  value={roomIdInput}
+                  onChange={(e) => setRoomIdInput(e.target.value)}
                   className="input w-full bg-black/20 border-0 border-b-2 border-white/10 text-3xl font-bold text-center text-white placeholder:text-white/5 focus:outline-none focus:border-cyan-400 focus:bg-black/30 transition-all h-16 rounded-lg font-mono tracking-widest"
                 />
               </div>
@@ -151,7 +255,7 @@ export const EntranceScreen = () => {
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/80 backdrop-blur-md"
-              onClick={() => setShowProfileModal(false)}
+              onClick={() => !isProcessing && setShowProfileModal(false)}
             />
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -201,10 +305,10 @@ export const EntranceScreen = () => {
                 <button 
                   type="button" 
                   onClick={handleConfirmProfile}
-                  disabled={!userName.trim()}
+                  disabled={!userName.trim() || isProcessing}
                   className="btn btn-lg w-full bg-gradient-to-r from-cyan-600 to-blue-600 border-0 text-white font-black tracking-widest hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:scale-100 shadow-lg shadow-cyan-500/20"
                 >
-                  GO !
+                  {isProcessing ? "PROCESSING..." : "GO !"}
                 </button>
               </div>
             </motion.div>
