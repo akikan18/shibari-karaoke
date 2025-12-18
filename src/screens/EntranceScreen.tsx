@@ -10,7 +10,7 @@ import { auth, db } from '../firebase';
 
 const AVATARS = ['🎤', '🎸', '🎹', '🥁', '🎷', '🎧', '👑', '🎩', '🐶', '🐱', '🦁', '🐼', '🐯', '👽', '👻', '🤖'];
 
-// --- アニメーション設定 (そのまま) ---
+// --- アニメーション設定 ---
 const containerVariants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.3, delayChildren: 0.5 } },
@@ -33,7 +33,10 @@ export const EntranceScreen = () => {
   
   // UI State
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // 処理中フラグ
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  // ★追加: エラーモーダル用
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Navigation & Mode State
   const [targetPath, setTargetPath] = useState<string>(''); 
@@ -42,44 +45,44 @@ export const EntranceScreen = () => {
   // User Data State
   const [userName, setUserName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
-  const [roomIdInput, setRoomIdInput] = useState(''); // ゲスト用入力ID
+  const [roomIdInput, setRoomIdInput] = useState('');
 
-  // --- ヘルパー関数: ランダムなRoom ID生成 ---
   const generateRoomId = () => Math.floor(1000 + Math.random() * 9000).toString();
 
-  // --- 開始ボタンクリック（モーダルを開く前） ---
+  // ★修正: 数字のみ4桁入力制限
+  const handleRoomIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    // 数字のみ かつ 4桁以内
+    if (/^[0-9]*$/.test(val) && val.length <= 4) {
+      setRoomIdInput(val);
+    }
+  };
+
   const handleStartClick = (e: React.MouseEvent, path: string, isHost: boolean) => {
     e.preventDefault();
-    
-    // ゲスト参加なのにRoomIDが空の場合は弾く
-    if (!isHost && !roomIdInput.trim()) {
-      alert("Please enter a Room ID");
+    if (!isHost && roomIdInput.length !== 4) {
+      setErrorMsg("ルームIDは4桁の数字を入力してください");
       return;
     }
-
     setTargetPath(path);
     setIsHostMode(isHost);
     setShowProfileModal(true);
   };
 
-  // --- プロフィール確定 & Firebase処理 ---
   const handleConfirmProfile = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!userName.trim()) return;
-    if (isProcessing) return; // 連打防止
+    if (isProcessing) return;
 
     setIsProcessing(true);
 
     try {
-      // 1. 匿名ログイン (ホスト・ゲスト共通)
       const userCredential = await signInAnonymously(auth);
       const userId = userCredential.user.uid;
       let finalRoomId = roomIdInput;
 
       if (isHostMode) {
-        // --- HOST: ルーム作成処理 ---
-        
-        // ユニークなIDを生成
+        // --- HOST ---
         let isUnique = false;
         while (!isUnique) {
           finalRoomId = generateRoomId();
@@ -88,17 +91,15 @@ export const EntranceScreen = () => {
           if (!roomSnap.exists()) isUnique = true;
         }
 
-        // 初期メンバーデータ
         const hostMember = {
           id: userId,
           name: userName,
           avatar: selectedAvatar,
           isHost: true,
-          isReady: true,
+          isReady: true, 
           joinedAt: Date.now()
         };
 
-        // Firestoreに保存
         await setDoc(doc(db, "rooms", finalRoomId), {
           roomId: finalRoomId,
           hostId: userId,
@@ -109,24 +110,22 @@ export const EntranceScreen = () => {
         });
 
       } else {
-        // --- GUEST: ルーム参加処理 ---
-
+        // --- GUEST ---
         const roomRef = doc(db, "rooms", finalRoomId);
         const roomSnap = await getDoc(roomRef);
 
         if (!roomSnap.exists()) {
-          alert("Room not found! IDを確認してください。");
+          setErrorMsg("部屋が見つかりません。\nIDを確認してください。");
           setIsProcessing(false);
           return;
         }
 
-        // メンバー追加
         const newMember = {
           id: userId,
           name: userName,
           avatar: selectedAvatar,
           isHost: false,
-          isReady: false,
+          isReady: false, 
           joinedAt: Date.now()
         };
 
@@ -135,7 +134,6 @@ export const EntranceScreen = () => {
         });
       }
 
-      // 2. ローカル保存 (アプリ内で使い回す情報)
       const userInfo = {
         userId: userId,
         name: userName,
@@ -145,22 +143,19 @@ export const EntranceScreen = () => {
       };
       localStorage.setItem('shibari_user_info', JSON.stringify(userInfo));
 
-      // 3. 画面遷移
       navigate(targetPath);
 
     } catch (error) {
       console.error("Error:", error);
-      alert("エラーが発生しました。もう一度お試しください。");
+      setErrorMsg("通信エラーが発生しました。\nもう一度お試しください。");
     } finally {
       setIsProcessing(false);
     }
   };
 
   return (
-    // ★修正: bg-[#020617] を削除し、背景を透明にしました
     <div className="w-full min-h-[80vh] text-white overflow-hidden relative flex flex-col items-center justify-center py-10">
       
-      {/* 背景装飾 (Orbs) */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-purple-900/20 blur-[120px] rounded-full mix-blend-screen"></div>
         <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-blue-900/20 blur-[120px] rounded-full mix-blend-screen"></div>
@@ -172,8 +167,6 @@ export const EntranceScreen = () => {
         animate="show"
         className="relative z-10 w-full max-w-4xl flex flex-col items-center gap-10"
       >
-        
-        {/* 1. タイトルエリア */}
         <div className="text-center flex flex-col items-center">
           <h1 className="text-6xl md:text-8xl font-black tracking-tighter text-white drop-shadow-2xl overflow-hidden leading-none">
             <motion.span variants={titleItemVariants} className="block bg-gradient-to-br from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent py-2">
@@ -192,12 +185,9 @@ export const EntranceScreen = () => {
           </div>
         </div>
 
-        {/* 2. 操作パネル */}
         <motion.div variants={cardVariants} className="w-full max-w-md relative group perspective-1000">
           <div className="relative overflow-hidden rounded-3xl bg-white/5 backdrop-blur-3xl border border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.5)] transition-all duration-500 hover:border-cyan-500/30">
-            
             <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent"></div>
-
             <div className="p-8 flex flex-col gap-6 relative z-10">
               <div className="form-control group/input">
                 <label className="label pl-1">
@@ -205,9 +195,10 @@ export const EntranceScreen = () => {
                 </label>
                 <input 
                   type="text" 
+                  inputMode="numeric"
                   placeholder="0000"
                   value={roomIdInput}
-                  onChange={(e) => setRoomIdInput(e.target.value)}
+                  onChange={handleRoomIdChange}
                   className="input w-full bg-black/20 border-0 border-b-2 border-white/10 text-3xl font-bold text-center text-white placeholder:text-white/5 focus:outline-none focus:border-cyan-400 focus:bg-black/30 transition-all h-16 rounded-lg font-mono tracking-widest"
                 />
               </div>
@@ -231,12 +222,10 @@ export const EntranceScreen = () => {
                   // Create New Room (Host)
                 </button>
               </motion.div>
-
             </div>
           </div>
         </motion.div>
 
-        {/* 3. お題管理画面へのボタン */}
         <motion.div variants={titleItemVariants} className="mt-4">
           <button 
             onClick={() => navigate('/custom')}
@@ -245,7 +234,6 @@ export const EntranceScreen = () => {
             <span className="group-hover:text-cyan-400">⚙️</span> MANAGE TOPICS
           </button>
         </motion.div>
-
       </motion.div>
 
       {/* プロフィール設定モーダル */}
@@ -265,9 +253,7 @@ export const EntranceScreen = () => {
             >
               <div className="bg-gradient-to-b from-slate-800/50 to-slate-900/50 p-6 md:p-8 rounded-xl flex flex-col gap-6">
                 <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-widest uppercase">
-                    Who are you?
-                  </h3>
+                  <h3 className="text-xl font-black text-white tracking-widest uppercase">Who are you?</h3>
                   <p className="text-xs text-gray-400 font-mono mt-1">プロフィールを設定してください</p>
                 </div>
                 <div className="flex flex-col items-center gap-4">
@@ -311,6 +297,37 @@ export const EntranceScreen = () => {
                   {isProcessing ? "PROCESSING..." : "GO !"}
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ★追加: エラー通知モーダル */}
+      <AnimatePresence>
+        {errorMsg && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+              onClick={() => setErrorMsg(null)}
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-sm bg-[#0f172a] border border-red-500/50 rounded-2xl shadow-[0_0_30px_rgba(220,38,38,0.3)] overflow-hidden p-1 z-[101]"
+            >
+               <div className="bg-gradient-to-b from-red-900/20 to-black p-6 rounded-xl flex flex-col items-center text-center gap-4">
+                  <div className="text-3xl">⚠️</div>
+                  <h3 className="text-lg font-black text-red-400 tracking-widest">ERROR</h3>
+                  <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{errorMsg}</p>
+                  <button 
+                    onClick={() => setErrorMsg(null)}
+                    className="mt-2 w-full py-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold tracking-widest text-xs transition-colors"
+                  >
+                    CLOSE
+                  </button>
+               </div>
             </motion.div>
           </div>
         )}
