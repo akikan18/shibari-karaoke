@@ -1,4 +1,3 @@
-// src/screens/GamePlayScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -37,7 +36,7 @@ export const GamePlayScreen = () => {
   const navigate = useNavigate();
   const [turn, setTurn] = useState(1);
   const [queue, setQueue] = useState<PlayerState[]>([]);
-  
+   
   // モーダルの表示状態管理
   const [showFinishModal, setShowFinishModal] = useState(false);
 
@@ -71,21 +70,22 @@ export const GamePlayScreen = () => {
     navigate('/result');
   };
 
-  if (queue.length === 0) return <div className="bg-[#0f172a] h-screen w-full flex items-center justify-center text-white">LOADING...</div>;
+  // 背景色を削除 (bg-[#0f172a] -> transparent)
+  if (queue.length === 0) return <div className="h-screen w-full flex items-center justify-center text-white">LOADING...</div>;
 
   const currentPlayer = queue[0];
 
   return (
-    // 全体コンテナ
-    <div className="w-full h-[100dvh] bg-[#0f172a] text-white overflow-hidden flex flex-col md:flex-row relative">
-      
+    // 全体コンテナ: 背景色bg-[#0f172a]を削除し、Layoutの背景が見えるように修正
+    <div className="w-full h-[100dvh] text-white overflow-hidden flex flex-col md:flex-row relative">
+       
       {/* ==========================================
           LEFT AREA (Main Stage & Controls)
       ========================================== */}
       <div className="flex-1 flex flex-col h-full relative z-10 min-w-0">
         
         {/* Header */}
-        <div className="flex-none h-20 flex justify-between items-center px-6 md:px-8 border-b border-white/10 bg-black/30 backdrop-blur-md">
+        <div className="flex-none h-20 flex justify-between items-center px-6 md:px-8 border-b border-white/10 bg-black/20 backdrop-blur-md">
           <div className="flex items-center gap-4 min-w-0">
             <div className="flex-none w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center text-2xl shadow-[0_0_15px_cyan] border border-white/20">
               🎤
@@ -151,11 +151,11 @@ export const GamePlayScreen = () => {
         </div>
 
         {/* Footer Actions */}
-        <div className="flex-none px-4 pt-4 pb-8 md:px-6 md:pt-6 md:pb-12 bg-gradient-to-t from-black/90 to-transparent z-20 w-full">
+        <div className="flex-none px-4 pt-4 pb-8 md:px-6 md:pt-6 md:pb-12 bg-gradient-to-t from-black/80 to-transparent z-20 w-full">
           <div className="flex gap-3 md:gap-6 w-full max-w-5xl mx-auto h-20 md:h-24">
             <button 
               onClick={() => handleNextTurn('FAILED')}
-              className="flex-1 rounded-xl md:rounded-2xl bg-[#1e293b] border-2 border-[#334155] text-gray-400 hover:bg-[#334155] hover:text-white font-black text-xl md:text-2xl tracking-widest active:scale-95 transition-all flex flex-col items-center justify-center gap-1 group"
+              className="flex-1 rounded-xl md:rounded-2xl bg-[#1e293b]/80 backdrop-blur-sm border-2 border-[#334155] text-gray-400 hover:bg-[#334155] hover:text-white font-black text-xl md:text-2xl tracking-widest active:scale-95 transition-all flex flex-col items-center justify-center gap-1 group"
             >
               FAILED
               <span className="text-[10px] font-normal opacity-50 group-hover:opacity-100">失敗...</span>
@@ -163,7 +163,7 @@ export const GamePlayScreen = () => {
 
             <button 
               onClick={() => handleNextTurn('CLEAR')}
-              className="flex-[2] rounded-xl md:rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 border-0 text-white font-black text-2xl md:text-4xl italic tracking-widest shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_50px_rgba(6,182,212,0.6)] hover:scale-[1.02] active:scale-95 transition-all relative overflow-hidden group flex flex-col items-center justify-center gap-1"
+              className="flex-[2] rounded-xl md:rounded-2xl bg-gradient-to-r from-cyan-600/90 to-blue-600/90 backdrop-blur-sm border-0 text-white font-black text-2xl md:text-4xl italic tracking-widest shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_50px_rgba(6,182,212,0.6)] hover:scale-[1.02] active:scale-95 transition-all relative overflow-hidden group flex flex-col items-center justify-center gap-1"
             >
               <span className="relative z-10">CLEAR!!</span>
               <span className="relative z-10 text-[10px] md:text-sm font-bold text-cyan-100 tracking-normal opacity-80">成功！次の人へ</span>
@@ -176,7 +176,8 @@ export const GamePlayScreen = () => {
       {/* ==========================================
           RIGHT AREA (Queue Sidebar)
       ========================================== */}
-      <div className="hidden md:flex w-[300px] lg:w-[360px] flex-none bg-[#020617]/90 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
+      {/* 背景を少し透過させてLayoutが見えるように調整 (bg-[#020617]/90 -> bg-black/60) */}
+      <div className="hidden md:flex w-[300px] lg:w-[360px] flex-none bg-black/60 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
         <div className="p-4 md:p-6 border-b border-white/10 bg-white/5 flex-none">
           <h3 className="text-xs md:text-sm font-bold text-white tracking-widest flex items-center gap-2">
             <span className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></span>
@@ -187,7 +188,7 @@ export const GamePlayScreen = () => {
           </p>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 custom-scrollbar">
           {queue.slice(1).map((player, index) => (
             <motion.div
               layout 
@@ -195,7 +196,8 @@ export const GamePlayScreen = () => {
               initial={{ x: 20, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               transition={{ duration: 0.3 }}
-              className="bg-[#0f172a] border border-white/10 p-3 rounded-xl relative overflow-hidden group hover:border-cyan-500/30 transition-colors shrink-0"
+              // カード背景も少し透過
+              className="bg-black/40 border border-white/10 p-3 rounded-xl relative overflow-hidden group hover:border-cyan-500/30 transition-colors shrink-0"
             >
                <div className="absolute top-0 right-0 bg-white/10 px-2 py-1 rounded-bl-lg text-[10px] font-mono text-gray-400">
                  NEXT #{index + 1}
@@ -233,9 +235,9 @@ export const GamePlayScreen = () => {
       </div>
 
       {/* モバイル用簡易リスト */}
-      <div className="md:hidden w-full bg-black/50 border-t border-white/10 p-4 pb-8 overflow-x-auto whitespace-nowrap flex gap-3 flex-none h-40 items-center">
+      <div className="md:hidden w-full bg-black/60 backdrop-blur-md border-t border-white/10 p-4 pb-8 overflow-x-auto whitespace-nowrap flex gap-3 flex-none h-40 items-center">
          {queue.slice(1).map((player, index) => (
-           <div key={player.name} className="inline-block w-40 bg-white/5 border border-white/10 rounded-lg p-3 flex-none h-full overflow-hidden">
+           <div key={player.name} className="inline-block w-40 bg-black/40 border border-white/10 rounded-lg p-3 flex-none h-full overflow-hidden">
              <div className="text-[10px] text-gray-500 mb-1">NEXT #{index + 1}</div>
              <div className="font-bold text-xs text-white mb-1 truncate">{player.name}</div>
              <div className="text-[10px] text-cyan-400 whitespace-normal line-clamp-2 leading-tight">{player.challenge.title}</div>
