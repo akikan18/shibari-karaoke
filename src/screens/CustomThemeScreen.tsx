@@ -22,9 +22,7 @@ export const CustomThemeScreen = () => {
   const [inputCriteria, setInputCriteria] = useState('');
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   
-  // 複数選択用のState (IDの配列)
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  // 削除確認モーダルの表示
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
@@ -52,7 +50,6 @@ export const CustomThemeScreen = () => {
     setInputCriteria('');
   };
 
-  // 選択の切り替え（トグル）
   const toggleSelection = (id: string) => {
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(itemId => itemId !== id));
@@ -61,21 +58,21 @@ export const CustomThemeScreen = () => {
     }
   };
 
-  // 実際に削除を実行
   const executeDelete = () => {
     const newThemes = themes.filter(t => !selectedIds.includes(t.id));
     setThemes(newThemes);
     localStorage.setItem('shibari_custom_themes', JSON.stringify(newThemes));
-    setSelectedIds([]); // 選択解除
-    setShowDeleteModal(false); // モーダル閉じる
+    setSelectedIds([]);
+    setShowDeleteModal(false);
   };
 
   return (
-    <div className="w-full h-screen text-white flex flex-col items-center relative overflow-hidden">
+    // 100dvh を使用してスマホのアドレスバーによるズレを防止
+    <div className="w-full h-[100dvh] text-white flex flex-col items-center relative overflow-hidden">
       <div className="w-full max-w-7xl flex flex-col h-full px-4 py-8 md:py-12 relative z-10">
         
         {/* ヘッダー */}
-        <div className="flex justify-between items-end mb-8">
+        <div className="flex justify-between items-end mb-6 shrink-0">
           <div>
             <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
               EDIT THEMES
@@ -97,8 +94,8 @@ export const CustomThemeScreen = () => {
         </div>
 
         {/* 入力エリア */}
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-lg">
-          <div className="flex flex-col md:flex-row gap-6 items-end">
+        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 md:p-6 mb-6 shadow-lg shrink-0">
+          <div className="flex flex-col md:flex-row gap-4 md:gap-6 items-end">
             <div className="flex-[3] w-full group">
               <label className="text-[10px] font-bold text-cyan-400 tracking-widest block mb-2 opacity-70">NEW MISSION</label>
               <input type="text" value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="Ex: 英語禁止で歌え！" className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-cyan-500 focus:bg-black/40 focus:outline-none transition-all placeholder:text-white/10" />
@@ -111,28 +108,9 @@ export const CustomThemeScreen = () => {
           </div>
         </div>
 
-        {/* 選択中のアクションバー（浮いているボタン） */}
-        <AnimatePresence>
-          {selectedIds.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="absolute bottom-24 md:bottom-32 left-0 right-0 z-30 flex justify-center pointer-events-none"
-            >
-              <button 
-                onClick={() => setShowDeleteModal(true)}
-                className="pointer-events-auto bg-red-600 hover:bg-red-500 text-white px-8 py-3 rounded-full font-black tracking-widest shadow-[0_0_30px_rgba(220,38,38,0.5)] flex items-center gap-3 transition-transform hover:scale-105 active:scale-95"
-              >
-                <span>DELETE SELECTED</span>
-                <span className="bg-white text-red-600 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{selectedIds.length}</span>
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* リストエリア */}
-        <div className="flex-1 overflow-y-auto pr-2 pb-20 custom-scrollbar">
+        {/* pb-64 (256px) という巨大な余白を設定し、スクロール時に要素が完全に浮き上がるようにする */}
+        <div className="flex-1 overflow-y-auto pr-2 pb-64 custom-scrollbar">
           <p className="text-xs text-gray-500 font-mono mb-2 text-right">
             {selectedIds.length === 0 ? "TAP CARD TO SELECT" : `${selectedIds.length} ITEMS SELECTED`}
           </p>
@@ -156,7 +134,7 @@ export const CustomThemeScreen = () => {
                         ? 'bg-cyan-900/30 border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.3)]' 
                         : 'bg-white/5 border-white/10 hover:bg-white/10'}
                     `}>
-                      {/* 選択時のチェックマーク演出 */}
+                      {/* チェックマーク */}
                       <div className={`
                         absolute top-3 right-3 w-6 h-6 rounded border transition-all flex items-center justify-center
                         ${isSelected ? 'bg-cyan-500 border-cyan-500' : 'border-white/20 group-hover:border-white/40'}
@@ -194,16 +172,46 @@ export const CustomThemeScreen = () => {
           </div>
         </div>
 
-        {/* フッター */}
-        <div className="absolute bottom-12 left-0 w-full flex justify-center pointer-events-none">
-          <button onClick={() => navigate('/')} className="pointer-events-auto text-gray-500 hover:text-white transition-colors text-xs font-bold tracking-widest flex items-center gap-2 px-6 py-3"><span>←</span> BACK TO TITLE</button>
-        </div>
+      </div>
+
+      {/* FIXED ポジショニングレイヤー
+         リストの外に出し、画面全体に対して固定配置します。
+      */}
+      
+      {/* 削除ボタン: 下から96px (bottom-24) の位置に固定 */}
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-0 right-0 z-40 flex justify-center pointer-events-none px-4"
+          >
+            <button 
+              onClick={() => setShowDeleteModal(true)}
+              className="pointer-events-auto w-full md:w-auto bg-red-600 hover:bg-red-500 text-white px-8 py-4 rounded-full font-black tracking-widest shadow-[0_0_30px_rgba(220,38,38,0.5)] flex items-center justify-center gap-3 transition-transform hover:scale-105 active:scale-95 border border-red-400/50"
+            >
+              <span>DELETE SELECTED</span>
+              <span className="bg-white text-red-600 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">{selectedIds.length}</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 戻るボタン: 下から24px (bottom-6) の位置に固定 */}
+      <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center pointer-events-none px-4">
+        <button 
+          onClick={() => navigate('/')} 
+          className="pointer-events-auto text-gray-500 hover:text-white transition-colors text-xs font-bold tracking-widest flex items-center gap-2 px-6 py-3 bg-black/60 backdrop-blur-md rounded-full border border-white/10 shadow-lg"
+        >
+          <span>←</span> BACK TO TITLE
+        </button>
       </div>
 
       {/* 削除確認モーダル */}
       <AnimatePresence>
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowDeleteModal(false)} />
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-md bg-[#0f172a] border border-red-500/30 rounded-2xl shadow-[0_0_50px_rgba(220,38,38,0.2)] overflow-hidden p-1">
               <div className="bg-gradient-to-b from-red-900/20 to-black p-8 flex flex-col items-center text-center gap-6">
