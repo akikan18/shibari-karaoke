@@ -1,229 +1,202 @@
 // src/screens/GameSetupScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-// 初期メンバー（自分以外）
-const initialOthers = [
-  { id: 2, name: 'Yamada', isReady: true, avatar: '👑' },
-  { id: 3, name: 'Suzuki', isReady: true, avatar: '🎤' },
-  { id: 4, name: 'Tanaka', isReady: true, avatar: '🥁' },
+// --- モックデータ ---
+const MOCK_MEMBERS = [
+  { id: '1', name: 'YAMADA', avatar: '🎤', isReady: true },
+  { id: '2', name: 'SUZUKI', avatar: '🎸', isReady: true },
+  { id: '3', name: 'TANAKA', avatar: '🎹', isReady: false },
+  { id: '4', name: 'SATO', avatar: '🥁', isReady: true },
 ];
 
 export const GameSetupScreen = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   
-  // ロード状態管理
-  const [isLoading, setIsLoading] = useState(true);
+  // MenuScreenから渡されたモード情報を受け取る
+  // 戻ってきたときもここで新しいモードを受け取る
+  const gameMode = location.state?.mode || 'standard';
 
-  // 自分の情報
-  const [myInfo, setMyInfo] = useState({ name: 'You', avatar: '👤', isHost: false });
-  const [members, setMembers] = useState<any[]>([]);
-  
-  // 自分のReady状態
-  const [myReadyStatus, setMyReadyStatus] = useState(false);
+  const [members, setMembers] = useState(MOCK_MEMBERS);
+  const [isHost, setIsHost] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
 
-  // 部屋の状態
-  const [roomStatus, setRoomStatus] = useState<'WAITING' | 'SELECTING' | 'SELECTED'>('WAITING');
-  const [selectedMode, setSelectedMode] = useState<string | null>(null);
-
-  // 1. 起動時にローカルストレージからユーザー情報を取得
   useEffect(() => {
     const stored = localStorage.getItem('shibari_user_info');
     if (stored) {
       const parsed = JSON.parse(stored);
-      setMyInfo(parsed);
-      
-      // ホストなら初期状態を SELECTED にする簡易ロジック
-      if (parsed.isHost) {
-        setRoomStatus('SELECTED');
-        setSelectedMode("SHIBARI KARAOKE");
-      } else {
-        setRoomStatus('SELECTING'); // ゲストは選択待ち
-      }
+      setIsHost(parsed.isHost);
+    }
+  }, []);
 
-      // メンバーリスト構築
-      setMembers([
-        { id: 1, name: parsed.name, isReady: false, avatar: parsed.avatar },
-        ...initialOthers
-      ]);
-      
-      setIsLoading(false); // 読み込み完了
+  const handleStart = () => {
+    if (gameMode === 'free') {
+      navigate('/free');
     } else {
-      // 情報がない場合はエントランスへ
-      navigate('/');
+      navigate('/game');
     }
-  }, [navigate]);
+  };
 
+  const handleLeaveConfirm = () => {
+    navigate('/');
+  };
 
-  // 2. Guestの場合、ホストの選択を待つ演出
-  useEffect(() => {
-    if (!isLoading && !myInfo.isHost && roomStatus === 'SELECTING') {
-      const timer = setTimeout(() => {
-        setSelectedMode("SHIBARI KARAOKE");
-        setRoomStatus('SELECTED');
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [roomStatus, myInfo.isHost, isLoading]);
-
-
-  // 3. 自分のReady状態同期
-  useEffect(() => {
-    setMembers(prev => prev.map(m => m.id === 1 ? { ...m, isReady: myReadyStatus } : m));
-  }, [myReadyStatus]);
-
-  
-  // 読み込み中は何も表示しない
-  if (isLoading) return <div className="bg-[#0f172a] h-screen w-full"></div>;
+  // モード変更画面（メニュー）へ戻る
+  const handleChangeMode = () => {
+    navigate('/menu');
+  };
 
   return (
-    <div className="w-full max-w-5xl flex flex-col gap-8 h-[85vh] relative">
+    <div className="w-full h-screen text-white flex flex-col items-center relative overflow-hidden">
       
-      {/* ヘッダー */}
-      <motion.div 
-        layout
-        className="flex flex-col md:flex-row items-center justify-between bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 shadow-lg relative overflow-hidden"
-      >
-        {roomStatus === 'SELECTING' && (
-          <div className="absolute inset-0 bg-cyan-900/10 animate-pulse pointer-events-none"></div>
-        )}
+      {/* 背景エフェクト: モードによって色味を変える */}
+      <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
+        <div className={`absolute top-[-20%] right-[-10%] w-[50vw] h-[50vw] blur-[100px] rounded-full mix-blend-screen animate-pulse ${gameMode === 'free' ? 'bg-blue-900/30' : 'bg-cyan-900/20'}`}></div>
+      </div>
 
-        <div className="flex flex-col items-center md:items-start z-10">
-          <p className="text-cyan-400 text-xs font-bold tracking-[0.3em] uppercase mb-1">Room ID</p>
-          <h2 className="text-4xl md:text-5xl font-black text-white tracking-widest font-mono">
-            8891
-          </h2>
-        </div>
+      <div className="w-full max-w-6xl flex flex-col h-full px-4 py-8 md:py-12 relative z-10">
+        
+        {/* ヘッダーエリア */}
+        <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-4">
+          <div className="flex-1">
+            <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-200 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
+              LOBBY
+            </h1>
+            
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <span className="px-3 py-1 rounded bg-white/10 border border-white/20 text-xs font-mono tracking-widest text-cyan-300">
+                ID: 8891
+              </span>
 
-        {/* ステータス表示 */}
-        <div className="flex flex-col items-center md:items-end mt-4 md:mt-0 z-10">
-          <AnimatePresence mode="wait">
-            {roomStatus === 'SELECTING' && (
-              <motion.div 
-                key="selecting"
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                className="flex flex-col items-end"
-              >
-                <div className="flex items-center gap-3 mb-1">
-                  <div className="loading loading-spinner loading-sm text-cyan-400"></div>
-                  <p className="text-cyan-400 font-bold tracking-widest text-sm animate-pulse">
-                    HOST IS SELECTING MODE...
-                  </p>
-                </div>
-                <p className="text-[10px] text-gray-400 font-mono">ホストが次のゲームを選んでいます</p>
-              </motion.div>
+              {/* ▼▼▼ モード表示エリア ▼▼▼ */}
+              <div className={`
+                px-4 py-1.5 rounded border text-xs font-bold tracking-widest flex items-center gap-3 transition-colors
+                ${gameMode === 'free' 
+                  ? 'bg-blue-500/20 border-blue-500/50 text-blue-300 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
+                  : 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]'}
+              `}>
+                {gameMode === 'free' ? '🧪 FREE MODE' : '👥 GAME MODE'}
+                
+                {/* ホストのみ表示される変更ボタン */}
+                {isHost && (
+                  <button 
+                    onClick={handleChangeMode}
+                    className="ml-2 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 border border-white/20 text-[10px] text-white transition-all hover:scale-105"
+                  >
+                    CHANGE MODE 🔄
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            {/* ゲストへの案内メッセージ */}
+            {!isHost && (
+              <p className="text-[10px] text-gray-500 font-mono mt-2 tracking-widest animate-pulse">
+                HOST IS SELECTING SETTINGS...
+              </p>
             )}
 
-            {roomStatus === 'SELECTED' && (
-              <motion.div 
-                key="selected"
-                initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-end"
-              >
-                <p className="text-[10px] text-gray-400 font-mono tracking-widest mb-1">NEXT GAME MODE</p>
-                <p className="text-2xl font-black text-white italic tracking-widest drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
-                  {selectedMode}
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </div>
+          
+          <button 
+            onClick={() => setShowLeaveModal(true)}
+            className="px-4 py-2 rounded-full border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-bold tracking-widest transition-colors"
+          >
+            LEAVE ROOM
+          </button>
         </div>
-      </motion.div>
 
-
-      {/* メンバーリスト */}
-      <div className="flex-1 overflow-y-auto pr-2">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          <AnimatePresence>
-            {members.map((member, index) => (
-              <motion.div
-                key={member.id}
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="relative group"
-              >
-                <div className={`
-                  backdrop-blur-md border p-6 rounded-xl flex flex-col items-center gap-4 transition-all duration-300
-                  ${member.id === 1 ? 'bg-cyan-900/20 border-cyan-500/50 shadow-[0_0_20px_rgba(6,182,212,0.1)]' : 'bg-black/40 border-white/10'}
-                `}>
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-gray-800 to-black border-2 border-white/10 flex items-center justify-center text-4xl shadow-inner relative">
+        {/* メンバーリスト */}
+        <div className="flex-1 overflow-y-auto mb-8 pr-2 custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <AnimatePresence>
+              {members.map((member, index) => (
+                <motion.div
+                  key={member.id}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-4"
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-white/20 flex items-center justify-center text-2xl shadow-[0_0_10px_rgba(6,182,212,0.2)]">
                     {member.avatar}
-                    {member.isReady && (
-                      <div className="absolute -bottom-1 -right-1 bg-cyan-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_cyan]">
-                        READY
-                      </div>
-                    )}
                   </div>
-                  <div className="text-center">
-                    <h3 className="text-lg font-bold text-white tracking-wider truncate max-w-[150px]">
-                      {member.name} {member.id === 1 && "(YOU)"}
-                    </h3>
-                    <p className="text-xs text-gray-500 font-mono mt-1">
-                      {member.id === 1 && myInfo.isHost ? "HOST" : `PLAYER 0${index + 1}`}
-                    </p>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-lg tracking-wider">{member.name}</span>
+                      {index === 0 && <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-1.5 py-0.5 rounded border border-yellow-500/30">HOST</span>}
+                    </div>
+                    <p className="text-xs text-white/30 font-mono tracking-widest">READY</p>
                   </div>
+                </motion.div>
+              ))}
+              
+              {[...Array(2)].map((_, i) => (
+                <div key={`empty-${i}`} className="border border-white/5 rounded-xl p-4 flex items-center gap-4 opacity-30 border-dashed">
+                  <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl animate-pulse">?</div>
+                  <p className="text-sm font-mono tracking-widest">WAITING...</p>
                 </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* フッターアクション */}
+        <div className="h-24 flex items-center justify-center relative">
+          {isHost ? (
+            <button 
+              onClick={handleStart}
+              className={`
+                group relative px-12 py-4 rounded-full font-black text-xl tracking-[0.2em] transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(6,182,212,0.3)]
+                ${gameMode === 'free' 
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50' 
+                  : 'bg-white text-black hover:bg-cyan-50 hover:text-cyan-900 shadow-cyan-500/50'}
+              `}
+            >
+              <span className="relative z-10 flex items-center gap-3">
+                {gameMode === 'free' ? 'START FREE MODE' : 'START GAME'}
+                <span className="text-sm opacity-50">▶</span>
+              </span>
+            </button>
+          ) : (
+            <div className="flex flex-col items-center gap-2 opacity-50 animate-pulse">
+              <p className="text-sm font-bold tracking-widest text-cyan-200">
+                WAITING FOR HOST TO START...
+              </p>
+              <p className={`text-xs ${gameMode === 'free' ? 'text-blue-300' : 'text-cyan-300'}`}>
+                CURRENT MODE: {gameMode === 'free' ? 'FREE PLAY' : 'STANDARD'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-
-      {/* フッター操作エリア */}
-      <motion.div 
-        layout
-        className="flex items-center justify-between gap-4 pt-4 border-t border-white/10 bg-[#0f172a]/80 backdrop-blur-sm sticky bottom-0 p-4 -mx-4 rounded-t-2xl z-20"
-      >
-        <Link to="/" className="btn btn-ghost text-gray-400 hover:text-white">
-          ← LEAVE ROOM
-        </Link>
-        
-        <AnimatePresence mode="wait">
-          
-          {/* A. ゲストの場合: READYボタン */}
-          {!myInfo.isHost && (
-            <div className="flex gap-4">
-              {roomStatus === 'SELECTING' ? (
-                <div className="flex items-center gap-3 px-6 py-3 bg-white/5 rounded-lg border border-white/10">
-                   <span className="loading loading-dots loading-sm text-cyan-500"></span>
-                   <span className="text-gray-300 font-bold tracking-widest text-sm">WAITING FOR HOST</span>
+      {/* 離脱確認モーダル */}
+      <AnimatePresence>
+        {showLeaveModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowLeaveModal(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-md bg-[#0f172a] border border-red-500/30 rounded-2xl shadow-[0_0_50px_rgba(220,38,38,0.2)] overflow-hidden p-1">
+              <div className="bg-gradient-to-b from-red-900/20 to-black p-8 flex flex-col items-center text-center gap-6">
+                <div className="w-16 h-16 rounded-full bg-red-900/30 border border-red-500/30 flex items-center justify-center text-3xl">👋</div>
+                <div>
+                  <h2 className="text-2xl font-black text-white tracking-widest mb-2">LEAVE ROOM?</h2>
+                  <p className="text-gray-400 text-sm font-mono">
+                    ルームから退出してタイトル画面に戻りますか？<br/>
+                    {isHost && <span className="text-red-400 block mt-2">※あなたはホストです。退出するとルームは解散されます。</span>}
+                  </p>
                 </div>
-              ) : (
-                <button 
-                  onClick={() => setMyReadyStatus(!myReadyStatus)}
-                  className={`
-                    btn btn-lg px-8 border-0 font-black tracking-widest transition-all
-                    ${myReadyStatus 
-                      ? 'bg-transparent border-2 border-cyan-500 text-cyan-400 hover:bg-cyan-900/20' 
-                      : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:scale-105 shadow-[0_0_20px_cyan]'}
-                  `}
-                >
-                  {myReadyStatus ? "CANCEL READY" : "READY TO START!"}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* B. ホストの場合: GAME STARTボタン */}
-          {myInfo.isHost && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-              className="relative group"
-            >
-              <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg blur opacity-40 group-hover:opacity-100 transition duration-500 animate-pulse"></div>
-              <button 
-                onClick={() => navigate('/game-play')}
-                className="btn btn-lg px-12 border-0 bg-gradient-to-r from-cyan-600 to-blue-700 text-white font-black text-2xl tracking-widest relative rounded-lg hover:scale-105 transition-transform"
-              >
-                GAME START
-              </button>
+                <div className="flex w-full gap-3 mt-2">
+                  <button onClick={() => setShowLeaveModal(false)} className="flex-1 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-gray-400 font-bold tracking-widest text-sm transition-colors">CANCEL</button>
+                  <button onClick={handleLeaveConfirm} className="flex-1 py-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-widest text-sm shadow-lg shadow-red-900/50 transition-all hover:scale-[1.02]">{isHost ? 'DISBAND' : 'LEAVE'}</button>
+                </div>
+              </div>
             </motion.div>
-          )}
-
-        </AnimatePresence>
-      </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
