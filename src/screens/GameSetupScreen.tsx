@@ -15,10 +15,7 @@ export const GameSetupScreen = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // MenuScreenから渡されたモード情報を受け取る
-  // 戻ってきたときもここで新しいモードを受け取る
   const gameMode = location.state?.mode || 'standard';
-
   const [members, setMembers] = useState(MOCK_MEMBERS);
   const [isHost, setIsHost] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -32,10 +29,11 @@ export const GameSetupScreen = () => {
   }, []);
 
   const handleStart = () => {
+    console.log("Start button clicked, mode:", gameMode);
     if (gameMode === 'free') {
       navigate('/free');
     } else {
-      navigate('/game');
+      navigate('/game-play');
     }
   };
 
@@ -43,17 +41,17 @@ export const GameSetupScreen = () => {
     navigate('/');
   };
 
-  // モード変更画面（メニュー）へ戻る
   const handleChangeMode = () => {
     navigate('/menu');
   };
 
   return (
-    <div className="w-full h-screen text-white flex flex-col items-center relative overflow-hidden">
+    // Layoutの背景が見えるようにtransparent指定
+    <div className="w-full h-screen flex flex-col items-center relative overflow-hidden">
       
-      {/* 背景エフェクト: モードによって色味を変える */}
+      {/* 背景エフェクト: 少し薄くしてLayoutと馴染ませる */}
       <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
-        <div className={`absolute top-[-20%] right-[-10%] w-[50vw] h-[50vw] blur-[100px] rounded-full mix-blend-screen animate-pulse ${gameMode === 'free' ? 'bg-blue-900/30' : 'bg-cyan-900/20'}`}></div>
+        <div className={`absolute top-[-20%] right-[-10%] w-[60vw] h-[60vw] blur-[120px] rounded-full mix-blend-screen opacity-40 animate-pulse ${gameMode === 'free' ? 'bg-blue-900' : 'bg-cyan-900'}`}></div>
       </div>
 
       <div className="w-full max-w-6xl flex flex-col h-full px-4 py-8 md:py-12 relative z-10">
@@ -70,7 +68,7 @@ export const GameSetupScreen = () => {
                 ID: 8891
               </span>
 
-              {/* ▼▼▼ モード表示エリア ▼▼▼ */}
+              {/* モード表示 */}
               <div className={`
                 px-4 py-1.5 rounded border text-xs font-bold tracking-widest flex items-center gap-3 transition-colors
                 ${gameMode === 'free' 
@@ -79,7 +77,6 @@ export const GameSetupScreen = () => {
               `}>
                 {gameMode === 'free' ? '🧪 FREE MODE' : '👥 GAME MODE'}
                 
-                {/* ホストのみ表示される変更ボタン */}
                 {isHost && (
                   <button 
                     onClick={handleChangeMode}
@@ -91,7 +88,6 @@ export const GameSetupScreen = () => {
               </div>
             </div>
             
-            {/* ゲストへの案内メッセージ */}
             {!isHost && (
               <p className="text-[10px] text-gray-500 font-mono mt-2 tracking-widest animate-pulse">
                 HOST IS SELECTING SETTINGS...
@@ -118,14 +114,14 @@ export const GameSetupScreen = () => {
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.1 }}
-                  className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-4"
+                  className="bg-black/40 backdrop-blur-sm border border-white/10 rounded-xl p-4 flex items-center gap-4"
                 >
                   <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-white/20 flex items-center justify-center text-2xl shadow-[0_0_10px_rgba(6,182,212,0.2)]">
                     {member.avatar}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-lg tracking-wider">{member.name}</span>
+                      <span className="font-bold text-lg text-white tracking-wider">{member.name}</span>
                       {index === 0 && <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-1.5 py-0.5 rounded border border-yellow-500/30">HOST</span>}
                     </div>
                     <p className="text-xs text-white/30 font-mono tracking-widest">READY</p>
@@ -136,7 +132,7 @@ export const GameSetupScreen = () => {
               {[...Array(2)].map((_, i) => (
                 <div key={`empty-${i}`} className="border border-white/5 rounded-xl p-4 flex items-center gap-4 opacity-30 border-dashed">
                   <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl animate-pulse">?</div>
-                  <p className="text-sm font-mono tracking-widest">WAITING...</p>
+                  <p className="text-sm font-mono tracking-widest text-white/50">WAITING...</p>
                 </div>
               ))}
             </AnimatePresence>
@@ -144,9 +140,11 @@ export const GameSetupScreen = () => {
         </div>
 
         {/* フッターアクション */}
-        <div className="h-24 flex items-center justify-center relative">
+        {/* Z-indexを上げて確実にクリックできるようにする */}
+        <div className="h-24 flex items-center justify-center relative z-50">
           {isHost ? (
             <button 
+              type="button" // 明示的にtypeを指定
               onClick={handleStart}
               className={`
                 group relative px-12 py-4 rounded-full font-black text-xl tracking-[0.2em] transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(6,182,212,0.3)]
@@ -176,7 +174,7 @@ export const GameSetupScreen = () => {
       {/* 離脱確認モーダル */}
       <AnimatePresence>
         {showLeaveModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowLeaveModal(false)} />
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-md bg-[#0f172a] border border-red-500/30 rounded-2xl shadow-[0_0_50px_rgba(220,38,38,0.2)] overflow-hidden p-1">
               <div className="bg-gradient-to-b from-red-900/20 to-black p-8 flex flex-col items-center text-center gap-6">
