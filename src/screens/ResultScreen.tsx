@@ -3,6 +3,20 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
+// --- アニメーション設定 ---
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.1, delayChildren: 0.2 }
+  }
+};
+
+const itemVariants = {
+  hidden: { y: 20, opacity: 0 },
+  show: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 80 } }
+};
+
 // --- モックデータ ---
 const MEMBERS = ["YAMADA", "SUZUKI", "TANAKA", "SATO", "ITO", "NAKAMURA"];
 
@@ -73,27 +87,23 @@ export const ResultScreen = () => {
   const [results, setResults] = useState<ResultData[]>([]);
   const [showContent, setShowContent] = useState(false);
   const [isHost, setIsHost] = useState(false);
-  
-  // モーダル管理
-  const [showGuestDisbandModal, setShowGuestDisbandModal] = useState(false); // ゲスト用: 解散された通知
-  const [showHostDisbandModal, setShowHostDisbandModal] = useState(false);   // ホスト用: 解散確認
+  const [showGuestDisbandModal, setShowGuestDisbandModal] = useState(false);
+  const [showHostDisbandModal, setShowHostDisbandModal] = useState(false);
 
   useEffect(() => {
     setResults(generateResults());
     setTimeout(() => setShowContent(true), 500);
 
-    // ユーザー情報からホストかどうか判定
     const stored = localStorage.getItem('shibari_user_info');
     if (stored) {
       const parsed = JSON.parse(stored);
       setIsHost(parsed.isHost);
     }
     
-    // イベント初期化
     localStorage.removeItem('room_event');
   }, []);
 
-  // --- 疑似通信機能 (ゲスト用) ---
+  // --- 通信機能 ---
   useEffect(() => {
     if (isHost) return; 
 
@@ -111,105 +121,110 @@ export const ResultScreen = () => {
     return () => clearInterval(interval);
   }, [isHost, navigate]);
 
-
-  // --- ホストのアクション ---
   const handleHostAction = (action: 'NEXT' | 'DISBAND') => {
     if (action === 'NEXT') {
       localStorage.setItem('room_event', 'NEXT_GAME');
       navigate('/menu');
     } else {
-      // 解散確認モーダルを開く (window.confirm廃止)
       setShowHostDisbandModal(true);
     }
   };
 
-  // ホストが本当に解散を実行する
   const confirmHostDisband = () => {
     localStorage.setItem('room_event', 'DISBAND');
     navigate('/');
   };
 
-  // ゲストが解散通知を受け取ってトップへ戻る
   const handleGuestDisbandConfirm = () => {
     navigate('/');
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center relative overflow-hidden">
+    // ★修正: bg-[#020617] を削除し、背景を透明にして共通背景を表示
+    <div className="min-h-screen w-full text-white flex flex-col items-center relative overflow-hidden">
       
-      {/* 背景装飾 */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[20%] w-[60%] h-[60%] bg-purple-900/20 blur-[120px] rounded-full mix-blend-screen"></div>
-        <div className="absolute bottom-[-20%] right-[20%] w-[60%] h-[60%] bg-blue-900/20 blur-[120px] rounded-full mix-blend-screen"></div>
-      </div>
-
       {showContent && <Confetti />}
 
-      <div className="w-full max-w-5xl px-4 py-8 md:py-12 relative z-10 flex flex-col items-center">
+      <motion.div 
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+        className="w-full max-w-7xl px-4 py-8 md:py-16 relative z-10 flex flex-col items-center"
+      >
         
+        {/* タイトルエリア */}
         <motion.div 
-          initial={{ y: -50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-12"
+          variants={itemVariants}
+          className="text-center mb-16"
         >
-          <h1 className="text-5xl md:text-7xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-yellow-200 via-yellow-400 to-orange-500 drop-shadow-[0_0_20px_rgba(234,179,8,0.5)] pr-4 pb-2">
-            FINAL RESULTS
+          <h1 className="text-6xl md:text-8xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white via-yellow-200 to-yellow-600 drop-shadow-[0_0_30px_rgba(234,179,8,0.6)] pr-4 pb-4">
+            RESULTS
           </h1>
-          <p className="text-yellow-200/50 font-mono tracking-[0.5em] mt-2 text-sm md:text-base">
-            TOTAL SCORE RANKING
-          </p>
+          <div className="flex items-center justify-center gap-4">
+             <div className="h-[1px] w-12 bg-white/30"></div>
+             <p className="text-white/50 font-mono tracking-[0.5em] text-sm">TOTAL SCORE RANKING</p>
+             <div className="h-[1px] w-12 bg-white/30"></div>
+          </div>
         </motion.div>
 
-        <div className="w-full flex flex-col gap-4">
+        {/* ランキングリスト */}
+        <div className="w-full flex flex-col gap-2 mb-20">
           <AnimatePresence>
             {showContent && results.map((result, index) => (
               <motion.div
                 key={result.name}
                 initial={{ x: -50, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.15, type: "spring", stiffness: 100 }}
-                className="relative"
+                transition={{ delay: index * 0.1, type: "spring", stiffness: 100 }}
+                className="relative group"
               >
+                {/* 背景: シンプルなグラデーションのみ */}
                 <div className={`
-                  relative overflow-hidden rounded-2xl border p-4 md:p-6 flex items-center gap-4 md:gap-8
-                  ${result.rank === 1 ? 'bg-yellow-900/20 border-yellow-500/50 shadow-[0_0_30px_rgba(234,179,8,0.2)]' : 
-                    result.rank === 2 ? 'bg-slate-800/40 border-slate-400/50' :
-                    result.rank === 3 ? 'bg-orange-900/20 border-orange-700/50' :
-                    'bg-white/5 border-white/10'}
+                  relative flex items-center gap-6 md:gap-12 px-4 py-4 md:px-8 md:py-6 rounded-xl transition-all
+                  ${result.rank === 1 
+                    ? 'bg-gradient-to-r from-yellow-500/20 via-yellow-500/5 to-transparent' 
+                    : 'bg-gradient-to-r from-white/10 via-white/5 to-transparent hover:from-white/20'}
                 `}>
                   
+                  {/* 1位だけのキラキラエフェクト */}
                   {result.rank === 1 && (
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-yellow-400/10 to-transparent animate-[shimmer_2s_infinite]"></div>
+                    <div className="absolute inset-0 bg-yellow-400/10 blur-xl opacity-20 animate-pulse"></div>
                   )}
 
+                  {/* ランク番号 */}
                   <div className={`
-                    flex-none w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center text-2xl md:text-3xl font-black
-                    ${result.rank === 1 ? 'bg-gradient-to-br from-yellow-300 to-yellow-600 text-black shadow-lg shadow-yellow-500/50' : 
-                      result.rank === 2 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-black shadow-lg' :
-                      result.rank === 3 ? 'bg-gradient-to-br from-orange-300 to-orange-600 text-black shadow-lg' :
-                      'bg-white/10 text-white/50 font-mono'}
+                    flex-none w-16 text-center text-4xl md:text-6xl font-black italic
+                    ${result.rank === 1 ? 'text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)]' : 
+                      result.rank === 2 ? 'text-slate-300' :
+                      result.rank === 3 ? 'text-orange-400' :
+                      'text-white/20'}
                   `}>
-                    {result.rank === 1 ? '👑' : `#${result.rank}`}
+                    {result.rank}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <h2 className={`font-black truncate ${result.rank === 1 ? 'text-3xl md:text-5xl text-yellow-100' : 'text-xl md:text-3xl text-white'}`}>
+                  {/* プレイヤー情報 */}
+                  <div className="flex-1 min-w-0 flex flex-col md:flex-row md:items-end gap-2 md:gap-8">
+                    <h2 className={`font-black tracking-tighter truncate leading-none ${result.rank === 1 ? 'text-4xl md:text-6xl text-white' : 'text-2xl md:text-4xl text-white/90'}`}>
                       {result.name}
                     </h2>
-                    <div className="flex gap-4 mt-1 text-xs md:text-sm font-mono opacity-70">
-                      <span className="text-cyan-300">CLEARED: {result.cleared}</span>
-                      <span className="text-red-300">FAILED: {result.failed}</span>
+                    
+                    {/* 詳細スタッツ */}
+                    <div className="flex gap-4 text-[10px] md:text-xs font-mono opacity-50 pb-1">
+                       <span className="bg-cyan-500/10 px-2 py-0.5 rounded text-cyan-300">CLEAR: {result.cleared}</span>
+                       <span className="bg-red-500/10 px-2 py-0.5 rounded text-red-300">FAIL: {result.failed}</span>
                     </div>
                   </div>
 
-                  <div className="text-right flex-none">
-                    <p className="text-[10px] md:text-xs text-gray-400 font-mono tracking-widest mb-1">TOTAL SCORE</p>
-                    <div className={`font-black font-mono tracking-tighter ${result.rank === 1 ? 'text-4xl md:text-6xl text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.8)]' : 'text-2xl md:text-4xl text-white'}`}>
+                  {/* スコア */}
+                  <div className="text-right flex-none z-10">
+                    <div className={`font-black font-mono tracking-tighter leading-none ${result.rank === 1 ? 'text-3xl md:text-5xl text-yellow-200' : 'text-xl md:text-3xl text-white/80'}`}>
                       <Counter from={0} to={result.score} />
-                      <span className="text-sm md:text-lg ml-1 opacity-50">pts</span>
+                      <span className="text-sm ml-1 opacity-40">pts</span>
                     </div>
                   </div>
+
+                  {/* 下線 */}
+                  <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-white/10 via-white/5 to-transparent"></div>
 
                 </div>
               </motion.div>
@@ -219,40 +234,34 @@ export const ResultScreen = () => {
 
         {/* フッターアクション */}
         <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 2 }}
-          className="mt-16 w-full flex justify-center px-4"
+          variants={itemVariants} 
+          className="w-full flex justify-center px-4"
         >
           {isHost ? (
-            // --- HOST VIEW ---
-            <div className="flex w-full max-w-3xl gap-4 flex-col md:flex-row">
+            <div className="flex w-full max-w-4xl gap-6 flex-col md:flex-row items-center">
               <button 
                 onClick={() => handleHostAction('DISBAND')}
-                className="flex-1 py-4 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-900/20 font-bold tracking-widest transition-all hover:border-red-500/60"
+                className="w-full md:w-auto px-8 py-4 text-red-400 hover:text-red-300 font-bold tracking-widest text-sm transition-colors opacity-70 hover:opacity-100"
               >
                 DISBAND ROOM
-                <span className="block text-[10px] font-normal opacity-60 mt-1">ルームを解散する</span>
               </button>
 
               <button 
                 onClick={() => handleHostAction('NEXT')}
-                className="flex-[2] py-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black tracking-widest shadow-lg shadow-cyan-500/30 transition-all hover:scale-[1.02] border border-white/10"
+                className="flex-1 w-full py-5 rounded-full bg-white text-black font-black text-xl tracking-widest shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:shadow-[0_0_50px_rgba(255,255,255,0.5)] hover:scale-105 transition-all"
               >
-                NEXT GAME
-                <span className="block text-[10px] font-normal opacity-70 mt-1">モード選択へ</span>
+                NEXT GAME <span className="text-sm font-normal opacity-50 ml-2">→</span>
               </button>
             </div>
           ) : (
-            // --- GUEST VIEW ---
-            <div className="flex flex-col items-center gap-2 opacity-60">
-               <span className="loading loading-spinner loading-md text-cyan-500"></span>
-               <p className="text-sm font-mono tracking-widest text-cyan-300">WAITING FOR HOST...</p>
+            <div className="flex flex-col items-center gap-3 opacity-50">
+               <span className="loading loading-dots loading-lg text-white"></span>
+               <p className="text-sm font-mono tracking-widest">WAITING FOR HOST...</p>
             </div>
           )}
         </motion.div>
 
-      </div>
+      </motion.div>
 
       {/* --- GUEST: 解散通知モーダル --- */}
       <AnimatePresence>
@@ -295,7 +304,6 @@ export const ResultScreen = () => {
       <AnimatePresence>
         {showHostDisbandModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* 背景 (クリックでキャンセル) */}
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/80 backdrop-blur-md"

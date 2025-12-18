@@ -1,31 +1,46 @@
 // src/App.tsx
-import { Routes, Route } from 'react-router-dom';
+import React from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
+
+// ★重要: レイアウトコンポーネントを復活
 import { Layout } from './components/Layout';
 
-// 画面コンポーネント
 import { EntranceScreen } from './screens/EntranceScreen';
 import { MenuScreen } from './screens/MenuScreen';
 import { GameSetupScreen } from './screens/GameSetupScreen';
-import { GamePlayScreen } from './screens/GamePlayScreen'; // ★追加
-import { ResultScreen } from './screens/ResultScreen'; // まだ作ってないのでコメントアウトのまま
+import { GamePlayScreen } from './screens/GamePlayScreen';
+import { ResultScreen } from './screens/ResultScreen';
+// 新規追加した画面
+import { CustomThemeScreen } from './screens/CustomThemeScreen';
+import { FreeModeScreen } from './screens/FreeModeScreen.tsx';
 
 function App() {
+  const location = useLocation();
+
   return (
+    // ★重要: ここで全体をLayoutで囲むことで、背景色などが適用されます
     <Layout>
-      <Routes>
-        <Route path="/" element={<EntranceScreen />} />
-        <Route path="/menu" element={<MenuScreen />} />
-        <Route path="/game-setup" element={<GameSetupScreen />} />
-        
-        {/* ★ここを本物に書き換え */}
-        <Route path="/game-play" element={<GamePlayScreen />} />
-        <Route path="/result" element={<ResultScreen />} />
-        
-        {/* 仮置き */}
-        <Route path="/topic-manage" element={<div className="text-2xl font-bold">TOPIC MANAGE (Coming Soon)</div>} />
-        <Route path="/free-mode" element={<div className="text-2xl font-bold">FREE MODE (Coming Soon)</div>} />
-        
-      </Routes>
+      <AnimatePresence mode="wait">
+        <Routes location={location} key={location.pathname}>
+          
+          <Route path="/" element={<EntranceScreen />} />
+          <Route path="/menu" element={<MenuScreen />} />
+          
+          {/* 追加機能 */}
+          <Route path="/custom" element={<CustomThemeScreen />} />
+          <Route path="/free" element={<FreeModeScreen />} />
+          
+          <Route path="/game-setup" element={<GameSetupScreen />} />
+          <Route path="/game-play" element={<GamePlayScreen />} />
+          <Route path="/result" element={<ResultScreen />} />
+
+          {/* ルーティング互換性のためのリダイレクト（念の為） */}
+          <Route path="/topic-manage" element={<CustomThemeScreen />} />
+          <Route path="/free-mode" element={<FreeModeScreen />} />
+
+        </Routes>
+      </AnimatePresence>
     </Layout>
   );
 }
