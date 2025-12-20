@@ -1,13 +1,8 @@
-// src/screens/CustomThemeScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-
-const DEFAULT_THEMES = [
-  { id: 'd1', title: "英語禁止で歌え！", criteria: "90点以上" },
-  { id: 'd2', title: "サビだけ裏声で！", criteria: "完走すること" },
-  { id: 'd3', title: "ずっと真顔で歌え！", criteria: "85点以上" },
-];
+import { db } from '../firebase';
+import { doc, onSnapshot, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 
 type ThemeItem = {
   id: string;
@@ -16,47 +11,78 @@ type ThemeItem = {
   isCustom: boolean; 
 };
 
+// アラート表示用の型
+type AlertInfo = {
+  type: 'success' | 'error';
+  title: string;
+  message: string;
+} | null;
+
 export const CustomThemeScreen = () => {
   const navigate = useNavigate();
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
-  // モーダル管理
+  // --- モーダル管理 State ---
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   
-  // 入力用State
+  // リセット用モーダル State
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<AlertInfo>(null);
+  
+  // 入力用 State
   const [inputTitle, setInputTitle] = useState('');
   const [inputCriteria, setInputCriteria] = useState('');
+  const [inputPassword, setInputPassword] = useState(''); // パスワード入力用
 
+  // Firestoreからリアルタイム取得
   useEffect(() => {
-    const stored = localStorage.getItem('shibari_custom_themes');
-    if (stored) {
-      setThemes(JSON.parse(stored));
-    } else {
-      const initialData = DEFAULT_THEMES.map(t => ({ ...t, isCustom: false }));
-      setThemes(initialData);
-    }
+    const themesRef = doc(db, "system", "themes");
+    const unsubscribe = onSnapshot(themesRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.list && Array.isArray(data.list)) {
+          setThemes(data.list);
+        } else {
+          setThemes([]);
+        }
+      } else {
+        setThemes([]);
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
-  const handleAdd = () => {
+  // 追加処理
+  const handleAdd = async () => {
     if (!inputTitle.trim() || !inputCriteria.trim()) return;
+    
     const newTheme: ThemeItem = {
       id: Date.now().toString(),
       title: inputTitle,
       criteria: inputCriteria,
       isCustom: true
     };
-    const newThemes = [newTheme, ...themes];
-    setThemes(newThemes);
-    localStorage.setItem('shibari_custom_themes', JSON.stringify(newThemes));
-    
-    // リセットして閉じる
-    setInputTitle('');
-    setInputCriteria('');
-    setShowAddModal(false);
+
+    try {
+      const themesRef = doc(db, "system", "themes");
+      const docSnap = await getDoc(themesRef);
+      const currentList = docSnap.exists() ? (docSnap.data().list || []) : [];
+      const newList = [newTheme, ...currentList];
+      await setDoc(themesRef, { list: newList }, { merge: true });
+      
+      setInputTitle('');
+      setInputCriteria('');
+      setShowAddModal(false);
+    } catch (error) {
+      console.error("Error adding theme:", error);
+      setAlertInfo({ type: 'error', title: 'ERROR', message: '追加に失敗しました' });
+    }
   };
 
+  // 選択処理
   const toggleSelection = (id: string) => {
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(itemId => itemId !== id));
@@ -65,16 +91,60 @@ export const CustomThemeScreen = () => {
     }
   };
 
-  const executeDelete = () => {
-    const newThemes = themes.filter(t => !selectedIds.includes(t.id));
-    setThemes(newThemes);
-    localStorage.setItem('shibari_custom_themes', JSON.stringify(newThemes));
-    setSelectedIds([]);
-    setShowDeleteModal(false);
+  // 削除実行
+  const executeDelete = async () => {
+    try {
+      const themesRef = doc(db, "system", "themes");
+      const docSnap = await getDoc(themesRef);
+      if (docSnap.exists()) {
+        const currentList = docSnap.data().list || [];
+        const newList = currentList.filter((t: any) => !selectedIds.includes(t.id));
+        await updateDoc(themesRef, { list: newList });
+      }
+      setSelectedIds([]);
+      setShowDeleteModal(false);
+    } catch (error) {
+      console.error("Error deleting themes:", error);
+      setAlertInfo({ type: 'error', title: 'ERROR', message: '削除に失敗しました' });
+    }
+  };
+
+  // --- リセットフロー ---
+
+  // 1. リセットボタンクリック -> 確認モーダル表示
+  const startResetProcess = () => {
+    setShowResetConfirmModal(true);
+  };
+
+  // 2. 確認モーダルでYES -> パスワードモーダルへ
+  const proceedToPassword = () => {
+    setShowResetConfirmModal(false);
+    setInputPassword('');
+    setShowPasswordModal(true);
+  };
+
+  // 3. パスワード送信 -> 判定して実行
+  const submitPassword = async () => {
+    if (inputPassword !== 'password') {
+      setShowPasswordModal(false);
+      setAlertInfo({ type: 'error', title: 'ACCESS DENIED', message: 'パスワードが間違っています。' });
+      return;
+    }
+
+    try {
+      const themesRef = doc(db, "system", "themes");
+      await updateDoc(themesRef, { list: [] });
+      setSelectedIds([]);
+      setShowPasswordModal(false);
+      setAlertInfo({ type: 'success', title: 'SUCCESS', message: '全てのお題を削除しました。' });
+    } catch (error) {
+      console.error("Error resetting themes:", error);
+      setShowPasswordModal(false);
+      setAlertInfo({ type: 'error', title: 'ERROR', message: 'エラーが発生しました。' });
+    }
   };
 
   return (
-    // 背景色を指定せず(transparent)、Layoutの背景が見えるようにする
     <div className="w-full h-[100dvh] flex flex-col items-center relative overflow-hidden">
       <div className="w-full max-w-7xl flex flex-col h-full px-4 py-6 md:py-12 relative z-10">
         
@@ -87,20 +157,14 @@ export const CustomThemeScreen = () => {
             <div className="h-[2px] w-24 bg-cyan-500 mt-2 shadow-[0_0_10px_cyan]"></div>
           </div>
           <button 
-            onClick={() => {
-              if (window.confirm('全て初期状態に戻しますか？')) {
-                setThemes(DEFAULT_THEMES.map(t => ({ ...t, isCustom: false })));
-                localStorage.removeItem('shibari_custom_themes');
-                setSelectedIds([]);
-              }
-            }}
+            onClick={startResetProcess}
             className="text-[10px] md:text-xs text-white/40 hover:text-red-400 transition-colors tracking-widest border border-white/10 px-3 py-1 rounded hover:bg-white/5"
           >
             RESET
           </button>
         </div>
 
-        {/* 追加ボタン (ここをクリックで入力モーダルが開く) */}
+        {/* 追加ボタン */}
         <button 
           onClick={() => setShowAddModal(true)}
           className="w-full md:w-auto mb-6 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/50 text-cyan-300 px-6 py-4 rounded-xl font-black tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.2)] flex items-center justify-center gap-2 transition-all hover:scale-[1.01] shrink-0"
@@ -109,7 +173,6 @@ export const CustomThemeScreen = () => {
         </button>
 
         {/* リストエリア */}
-        {/* 下部に十分な余白(pb-32)を持たせて、固定ボタンと被らないようにする */}
         <div className="flex-1 overflow-y-auto pr-2 pb-32 custom-scrollbar">
           <p className="text-xs text-gray-400 font-mono mb-2 text-right">
             {selectedIds.length === 0 ? "TAP TO SELECT" : `${selectedIds.length} SELECTED`}
@@ -193,7 +256,7 @@ export const CustomThemeScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* 戻るボタン (最下部固定) */}
+      {/* 戻るボタン */}
       <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center pointer-events-none px-4">
         <button 
           onClick={() => navigate('/')} 
@@ -204,9 +267,9 @@ export const CustomThemeScreen = () => {
       </div>
 
 
-      {/* --- モーダルエリア --- */}
+      {/* --- モーダルエリア (すべて画面内デザイン) --- */}
 
-      {/* 追加モーダル */}
+      {/* 1. 追加モーダル */}
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -215,7 +278,6 @@ export const CustomThemeScreen = () => {
               <h2 className="text-xl font-black text-white tracking-widest mb-6 flex items-center gap-2">
                 <span className="text-cyan-400">＋</span> ADD NEW MISSION
               </h2>
-              
               <div className="space-y-4">
                 <div>
                   <label className="text-[10px] font-bold text-cyan-400 tracking-widest block mb-1 opacity-70">MISSION TITLE</label>
@@ -226,7 +288,6 @@ export const CustomThemeScreen = () => {
                   <input type="text" value={inputCriteria} onChange={(e) => setInputCriteria(e.target.value)} placeholder="Ex: 85点以上" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-red-500 focus:outline-none placeholder:text-white/10" />
                 </div>
               </div>
-
               <div className="flex w-full gap-3 mt-8">
                 <button onClick={() => setShowAddModal(false)} className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-gray-400 font-bold tracking-widest text-sm">CANCEL</button>
                 <button onClick={handleAdd} disabled={!inputTitle || !inputCriteria} className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black tracking-widest text-sm shadow-lg shadow-cyan-900/50 disabled:opacity-50">ADD</button>
@@ -236,7 +297,7 @@ export const CustomThemeScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* 削除確認モーダル */}
+      {/* 2. 通常削除確認モーダル */}
       <AnimatePresence>
         {showDeleteModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -253,6 +314,79 @@ export const CustomThemeScreen = () => {
                   <button onClick={executeDelete} className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-widest text-sm shadow-lg shadow-red-900/50">DELETE</button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. リセット確認モーダル (WARNING) */}
+      <AnimatePresence>
+        {showResetConfirmModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowResetConfirmModal(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-md bg-[#0f172a] border border-red-600 rounded-2xl shadow-[0_0_50px_rgba(220,38,38,0.4)] overflow-hidden p-1">
+              <div className="bg-gradient-to-b from-red-950/80 to-black p-8 flex flex-col items-center text-center gap-6 rounded-xl">
+                <div className="text-4xl animate-pulse">⚠️</div>
+                <div>
+                  <h2 className="text-2xl font-black text-red-500 tracking-widest mb-2">WARNING</h2>
+                  <p className="text-white text-sm font-bold leading-relaxed">
+                    全てのお題を削除しようとしています。<br/>
+                    <span className="text-red-300 text-xs font-mono mt-1 block opacity-80">この操作は全員に反映され、元に戻せません。</span>
+                  </p>
+                </div>
+                <div className="flex w-full gap-3 mt-2">
+                  <button onClick={() => setShowResetConfirmModal(false)} className="flex-1 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-gray-400 font-bold tracking-widest text-sm">CANCEL</button>
+                  <button onClick={proceedToPassword} className="flex-1 py-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black tracking-widest text-sm shadow-lg shadow-red-900/50">PROCEED</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 4. パスワード入力モーダル */}
+      <AnimatePresence>
+        {showPasswordModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowPasswordModal(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-sm bg-[#0f172a] border border-white/20 rounded-2xl shadow-2xl overflow-hidden p-6 z-[101]">
+              <div className="flex flex-col gap-4">
+                <div className="text-center">
+                  <h3 className="text-lg font-black text-white tracking-widest mb-1">ADMIN AUTHENTICATION</h3>
+                  <p className="text-xs text-gray-400 font-mono">パスワードを入力してください</p>
+                </div>
+                <input 
+                  autoFocus 
+                  type="password" 
+                  value={inputPassword} 
+                  onChange={(e) => setInputPassword(e.target.value)} 
+                  className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg text-center font-bold text-white focus:border-cyan-500 focus:outline-none tracking-widest"
+                  placeholder="••••••••"
+                />
+                <div className="flex w-full gap-3 mt-2">
+                  <button onClick={() => setShowPasswordModal(false)} className="flex-1 py-3 rounded-lg border border-white/10 hover:bg-white/5 text-gray-400 font-bold tracking-widest text-xs">CANCEL</button>
+                  <button onClick={submitPassword} className="flex-1 py-3 rounded-lg bg-white text-black hover:bg-gray-200 font-black tracking-widest text-xs">CONFIRM</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5. アラート(結果/エラー)モーダル */}
+      <AnimatePresence>
+        {alertInfo && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setAlertInfo(null)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className={`relative w-full max-w-sm bg-[#0f172a] border rounded-2xl shadow-2xl overflow-hidden p-1 ${alertInfo.type === 'error' ? 'border-red-500/50 shadow-red-900/20' : 'border-cyan-500/50 shadow-cyan-900/20'}`}>
+               <div className={`p-6 rounded-xl flex flex-col items-center text-center gap-4 ${alertInfo.type === 'error' ? 'bg-red-900/10' : 'bg-cyan-900/10'}`}>
+                  <div className="text-3xl">{alertInfo.type === 'error' ? '🚫' : '✅'}</div>
+                  <div>
+                    <h3 className={`text-lg font-black tracking-widest ${alertInfo.type === 'error' ? 'text-red-400' : 'text-cyan-400'}`}>{alertInfo.title}</h3>
+                    <p className="text-sm text-gray-300 mt-1">{alertInfo.message}</p>
+                  </div>
+                  <button onClick={() => setAlertInfo(null)} className="mt-2 w-full py-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold tracking-widest text-xs">CLOSE</button>
+               </div>
             </motion.div>
           </div>
         )}

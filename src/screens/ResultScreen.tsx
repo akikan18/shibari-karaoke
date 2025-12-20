@@ -2,26 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
-// --- Firebase Imports ---
-import { doc, getDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore'; // getDocを追加
+// --- Firebase ---
+import { doc, getDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
-// --- アニメーション設定 ---
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.2 } }
-};
-const itemVariants = {
-  hidden: { y: 20, opacity: 0 },
-  show: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 80 } }
-};
+// --- Hooks & Components ---
+import { Toast, useToast } from '../components/Toast';
+import { usePresence } from '../hooks/usePresence';
+import { useWakeLock } from '../hooks/useWakeLock';
 
-type MemberData = {
-  id: string;
-  name: string;
-  score: number;
-  rank?: number;
-};
+// --- アニメーション設定 ---
+const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.2 } } };
+const itemVariants = { hidden: { y: 20, opacity: 0 }, show: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 80 } } };
+
+type MemberData = { id: string; name: string; score: number; rank?: number; };
 
 const Counter = ({ from, to }: { from: number; to: number }) => {
   const [count, setCount] = useState(from);
@@ -44,14 +38,7 @@ const Confetti = () => {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
       {[...Array(30)].map((_, i) => (
-        <motion.div
-          key={i}
-          initial={{ y: -20, x: Math.random() * window.innerWidth, rotate: 0 }}
-          animate={{ y: window.innerHeight + 100, rotate: 360 }}
-          transition={{ duration: Math.random() * 3 + 2, repeat: Infinity, delay: Math.random() * 2, ease: "linear" }}
-          className="absolute w-3 h-3 rounded-sm"
-          style={{ backgroundColor: ['#FFD700', '#FF69B4', '#00FFFF', '#ADFF2F'][i % 4], left: 0 }}
-        />
+        <motion.div key={i} initial={{ y: -20, x: Math.random() * window.innerWidth, rotate: 0 }} animate={{ y: window.innerHeight + 100, rotate: 360 }} transition={{ duration: Math.random() * 3 + 2, repeat: Infinity, delay: Math.random() * 2, ease: "linear" }} className="absolute w-3 h-3 rounded-sm" style={{ backgroundColor: ['#FFD700', '#FF69B4', '#00FFFF', '#ADFF2F'][i % 4], left: 0 }} />
       ))}
     </div>
   );
@@ -59,15 +46,23 @@ const Confetti = () => {
 
 export const ResultScreen = () => {
   const navigate = useNavigate();
+  const { messages, addToast, removeToast } = useToast();
+  useWakeLock();
+
   const [results, setResults] = useState<MemberData[]>([]);
   const [showContent, setShowContent] = useState(false);
   
   const [roomId, setRoomId] = useState('');
+  const [userId, setUserId] = useState(''); // 追加
   const [isHost, setIsHost] = useState(false);
   
   const [showGuestDisbandModal, setShowGuestDisbandModal] = useState(false);
   const [showHostDisbandModal, setShowHostDisbandModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // 生存監視用データ
+  const [roomData, setRoomData] = useState<any>(null);
+  const [members, setMembers] = useState<any[]>([]); // 自動削除用
 
   useEffect(() => {
     const stored = localStorage.getItem('shibari_user_info');
@@ -77,33 +72,31 @@ export const ResultScreen = () => {
     }
     const userInfo = JSON.parse(stored);
     setRoomId(userInfo.roomId);
+    setUserId(userInfo.userId); // 保存
     setIsHost(userInfo.isHost);
 
     const roomRef = doc(db, "rooms", userInfo.roomId);
     const unsubscribe = onSnapshot(roomRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        
-        const members: MemberData[] = (data.members || []).map((m: any) => ({
+        setRoomData(data); // 監視用
+        setMembers(data.members || []); // 監視用
+
+        const rawMembers: MemberData[] = (data.members || []).map((m: any) => ({
           id: m.id,
           name: m.name,
           score: m.score || 0
         }));
 
-        members.sort((a, b) => b.score - a.score);
-        const rankedMembers = members.map((m, i) => ({ ...m, rank: i + 1 }));
+        rawMembers.sort((a, b) => b.score - a.score);
+        const rankedMembers = rawMembers.map((m, i) => ({ ...m, rank: i + 1 }));
         setResults(rankedMembers);
         setTimeout(() => setShowContent(true), 500);
 
-        // --- 遷移先分岐 ---
         if (data.status === 'waiting') {
-           if (userInfo.isHost) {
-             navigate('/menu');       // ホストはモード選択へ
-           } else {
-             navigate('/game-setup'); // ゲストは待機画面へ
-           }
+           if (userInfo.isHost) navigate('/menu');
+           else navigate('/game-setup');
         }
-
       } else {
         setShowGuestDisbandModal(true);
       }
@@ -112,22 +105,40 @@ export const ResultScreen = () => {
     return () => unsubscribe();
   }, [navigate]);
 
-  // --- ★修正: スコアとREADY状態をリセット ---
+  // ★ 生存監視
+  const { offlineUsers, isHostMissing } = usePresence(roomId, userId, roomData, addToast);
+
+  // ★ Setup画面と同じ: ホストの場合、オフラインのゲストを自動削除
+  useEffect(() => {
+    if (!isHost || offlineUsers.size === 0 || !members.length) return;
+
+    const kickOfflineUsers = async () => {
+      const activeMembers = members.filter(m => !offlineUsers.has(m.id));
+      if (activeMembers.length !== members.length) {
+        try {
+          const roomRef = doc(db, "rooms", roomId);
+          await updateDoc(roomRef, { members: activeMembers });
+        } catch (error) {
+          console.error("Auto kick failed", error);
+        }
+      }
+    };
+    kickOfflineUsers();
+  }, [isHost, offlineUsers, members, roomId]);
+
   const handleNextGame = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
     try {
       const roomRef = doc(db, "rooms", roomId);
-      
-      // 現在のデータを取得してリセット用データを作成
       const roomSnap = await getDoc(roomRef);
       if (roomSnap.exists()) {
         const currentData = roomSnap.data();
         const resetMembers = (currentData.members || []).map((m: any) => ({
           ...m,
-          score: 0, // スコアリセット
-          isReady: m.isHost ? true : false, // ホスト以外はREADY解除
-          challenge: null // お題もリセット（次回GamePlayで再抽選）
+          score: 0,
+          isReady: m.isHost ? true : false,
+          challenge: null 
         }));
 
         await updateDoc(roomRef, {
@@ -135,7 +146,7 @@ export const ResultScreen = () => {
           currentTurnIndex: 0,
           turnCount: 1,
           currentChallenge: null,
-          members: resetMembers // リセットしたメンバー情報を保存
+          members: resetMembers 
         });
       }
     } catch (error) {
@@ -163,13 +174,29 @@ export const ResultScreen = () => {
     navigate('/');
   };
 
+  // ホスト不在時の退出処理
+  const handleForceLeave = async () => {
+    try {
+        const roomRef = doc(db, "rooms", roomId);
+        // ホスト不在なら自分だけ抜ける
+        const newMembers = members.filter(m => m.id !== userId);
+        await updateDoc(roomRef, { members: newMembers });
+        localStorage.removeItem('shibari_user_info');
+        navigate('/');
+    } catch (error) {
+        localStorage.removeItem('shibari_user_info');
+        navigate('/');
+    }
+  };
+
   return (
     <div className="min-h-screen w-full text-white flex flex-col items-center relative overflow-hidden">
       
       {showContent && <Confetti />}
+      <Toast messages={messages} onRemove={removeToast} />
 
       <motion.div variants={containerVariants} initial="hidden" animate="show" className="w-full max-w-7xl px-4 py-8 md:py-16 relative z-10 flex flex-col items-center">
-        
+        {/* (タイトル・ランキング表示部分は変更なしのため、既存のJSXをそのまま記述) */}
         <motion.div variants={itemVariants} className="text-center mb-10 md:mb-16">
           <h1 className="text-5xl md:text-8xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white via-yellow-200 to-yellow-600 drop-shadow-[0_0_30px_rgba(234,179,8,0.6)] pr-4 pb-4">RESULTS</h1>
           <div className="flex items-center justify-center gap-4">
@@ -216,8 +243,23 @@ export const ResultScreen = () => {
              </div>
           </motion.div>
         )}
-
       </motion.div>
+
+      {/* --- ホスト不在警告 (Setupと同じ) --- */}
+      <AnimatePresence>
+        {!isHost && isHostMissing && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/95 backdrop-blur-xl" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-sm bg-[#0f172a] border border-orange-500/50 rounded-2xl shadow-[0_0_50px_rgba(249,115,22,0.3)] p-1 z-50">
+               <div className="bg-gradient-to-b from-orange-900/40 to-black p-8 flex flex-col items-center text-center gap-6">
+                  <div className="text-4xl animate-bounce">📡</div>
+                  <div><h2 className="text-xl font-black text-orange-400 tracking-widest">WAITING FOR HOST</h2><p className="text-gray-400 text-sm font-mono mt-2 leading-relaxed">ホストとの接続が確認できません。<br/>再接続を待機しています...</p></div>
+                  <div className="w-full mt-2"><button onClick={handleForceLeave} className="w-full py-3 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 font-bold tracking-widest text-xs">LEAVE ROOM</button></div>
+               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showGuestDisbandModal && (
