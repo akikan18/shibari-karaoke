@@ -20,97 +20,126 @@ const shuffleArray = (array: any[]) => {
 };
 
 // --- 演出設定定数 (ミリ秒) ---
-const TIME_SPIN = 800;          // 回転時間
-const TIME_LOCK = 1200;         // 確定表示時間
-const TIME_PER_PERSON = 2000;   // 1人あたりの合計 (800+1200)
+const TIME_SPIN = 800;          // 1人の回転時間
+const TIME_LOCK = 1200;         // 1人の確定表示時間
 const TIME_LIST_WAIT = 4000;    // 全員決定後のリスト確認時間
-const TIME_GAME_START = 6000;   // ★変更: GAME START 表示時間を6秒に延長
+const TIME_GAME_START = 5000;   // GAME START 表示時間
 
-// --- 順次ルーレット演出用コンポーネント ---
+// --- 順次ルーレット演出用コンポーネント (完全修正版) ---
 const EliminationRouletteOverlay = ({ finalMembers }: { finalMembers: any[] }) => {
   const [confirmedList, setConfirmedList] = useState<any[]>([]);
   const [currentRound, setCurrentRound] = useState(0);
   
+  // 表示用
   const [displayAvatar, setDisplayAvatar] = useState('?');
   const [displayName, setDisplayName] = useState('');
   
-  // init -> spinning -> locked -> (repeat) -> finished -> gamestart
-  const [phase, setPhase] = useState<'init' | 'spinning' | 'locked' | 'finished' | 'gamestart'>('init');
+  // フェーズ: 'spinning' | 'locked' | 'finished' | 'gamestart'
+  const [phase, setPhase] = useState('init');
 
-  // 初期化
+  // アニメーション用のRef（Stateだとタイマー内で古くなるためRefで管理）
+  const phaseRef = useRef('init');
+  const roundRef = useRef(0);
+
+  // ステートとRefを同期させるヘルパー
+  const setPhaseSafe = (newPhase: string) => {
+    setPhase(newPhase);
+    phaseRef.current = newPhase;
+  };
+
+  // 初期化：メンバーデータが届いたら開始
   useEffect(() => {
-    if (finalMembers.length > 0 && phase === 'init') {
-      setPhase('spinning');
+    if (finalMembers.length > 0 && phaseRef.current === 'init') {
+      setPhaseSafe('spinning');
+      spinLoop();
     }
-  }, [finalMembers, phase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalMembers]);
 
-  // アニメーション制御
-  useEffect(() => {
-    if (phase === 'init' || phase === 'gamestart') return;
+  // ★ コアロジック: 再帰的な回転処理
+  const spinLoop = () => {
+    // 現在のフェーズやラウンドをRefから取得（常に最新）
+    if (phaseRef.current !== 'spinning') return;
 
-    // --- 全員終わったか判定 ---
-    if (currentRound >= finalMembers.length) {
-      if (phase !== 'finished') {
-        setPhase('finished');
-        // リスト確認時間後に GAME START へ
-        setTimeout(() => {
-          setPhase('gamestart');
-        }, TIME_LIST_WAIT);
-      }
+    const round = roundRef.current;
+    
+    // 全員終わっていたら終了へ
+    if (round >= finalMembers.length) {
+      setPhaseSafe('finished');
+      startFinishSequence();
       return;
     }
 
-    const targetMember = finalMembers[currentRound];
-    // まだ決まっていない人たち（演出用プール）
-    const candidates = finalMembers.slice(currentRound);
+    const targetMember = finalMembers[round];
+    // まだ確定していない候補者（演出用）
+    const candidates = finalMembers.slice(round);
 
-    let intervalId: NodeJS.Timeout;
-    let timerId: NodeJS.Timeout;
-
-    if (phase === 'spinning') {
-      // 最後の1人は回転なしで即確定
-      if (candidates.length <= 1) {
-        setDisplayAvatar(targetMember.avatar);
-        setDisplayName(targetMember.name);
-        setPhase('locked');
-        return;
-      }
-
-      let elapsed = 0;
-      const tick = 50;
-
-      intervalId = setInterval(() => {
-        const randomMember = candidates[Math.floor(Math.random() * candidates.length)];
-        setDisplayAvatar(randomMember.avatar);
-        setDisplayName("..."); 
-        elapsed += tick;
-
-        if (elapsed >= TIME_SPIN) {
-          clearInterval(intervalId);
-          setDisplayAvatar(targetMember.avatar);
-          setDisplayName(targetMember.name);
-          setPhase('locked');
-        }
-      }, tick);
-
-      return () => clearInterval(intervalId);
-
-    } else if (phase === 'locked') {
-      // 確定表示して次へ
-      timerId = setTimeout(() => {
-        setConfirmedList(prev => {
-           // 重複防止
-           if(prev.find(m => m.id === targetMember.id)) return prev;
-           return [...prev, targetMember];
-        });
-        setCurrentRound(prev => prev + 1);
-        setPhase('spinning');
-      }, TIME_LOCK);
-
-      return () => clearTimeout(timerId);
+    // 最後の1人は回転なしで即確定
+    if (candidates.length <= 1) {
+      setDisplayAvatar(targetMember.avatar);
+      setDisplayName(targetMember.name);
+      lockAndNext(targetMember);
+      return;
     }
 
-  }, [phase, currentRound, finalMembers]);
+    // --- 回転アニメーション ---
+    let elapsed = 0;
+    const tick = 60; // 更新間隔
+
+    const runTick = () => {
+      // ランダム表示
+      const random = candidates[Math.floor(Math.random() * candidates.length)];
+      if (random) {
+        setDisplayAvatar(random.avatar);
+        setDisplayName("..."); 
+      }
+
+      elapsed += tick;
+
+      if (elapsed >= TIME_SPIN) {
+        // 時間が来たら正解を表示してロックへ
+        setDisplayAvatar(targetMember.avatar);
+        setDisplayName(targetMember.name);
+        lockAndNext(targetMember);
+      } else {
+        // 次のフレームへ
+        setTimeout(runTick, tick);
+      }
+    };
+
+    runTick();
+  };
+
+  // 確定表示 -> 次のラウンドへ
+  const lockAndNext = (member: any) => {
+    setPhaseSafe('locked');
+
+    setTimeout(() => {
+      // リストに追加
+      setConfirmedList(prev => {
+        if (prev.find(m => m.id === member.id)) return prev;
+        return [...prev, member];
+      });
+
+      // ラウンドを進める
+      roundRef.current += 1;
+      setCurrentRound(roundRef.current);
+
+      // 次の回転へ戻る
+      setPhaseSafe('spinning');
+      
+      // 次のループを開始 (非同期で再帰呼び出し)
+      setTimeout(spinLoop, 50);
+
+    }, TIME_LOCK);
+  };
+
+  // 終了シーケンス (リスト確認 -> GameStart)
+  const startFinishSequence = () => {
+    setTimeout(() => {
+      setPhaseSafe('gamestart');
+    }, TIME_LIST_WAIT);
+  };
 
   return (
     <motion.div 
@@ -144,7 +173,6 @@ const EliminationRouletteOverlay = ({ finalMembers }: { finalMembers: any[] }) =
       {/* ルーレット画面 */}
       {phase !== 'gamestart' && phase !== 'init' && (
         <>
-          {/* タイトル */}
           <div className="relative z-10 mb-4 text-center flex-none h-16">
             {phase !== 'finished' ? (
               <>
@@ -158,7 +186,6 @@ const EliminationRouletteOverlay = ({ finalMembers }: { finalMembers: any[] }) =
             )}
           </div>
 
-          {/* ルーレット本体 (全て終わったら消す) */}
           {phase !== 'finished' && (
             <div className="relative z-10 flex flex-col items-center justify-center flex-none mb-6">
               <motion.div 
@@ -179,7 +206,6 @@ const EliminationRouletteOverlay = ({ finalMembers }: { finalMembers: any[] }) =
             </div>
           )}
 
-          {/* 確定リスト */}
           <motion.div 
             animate={phase === 'finished' ? { scale: 1.1, y: -20 } : { scale: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -377,11 +403,10 @@ export const GameSetupScreen = () => {
         turnCount: 1
       });
 
-      // ★ 演出時間の計算
-      // ルーレット時間: (人数-1) * 2000ms + 最後の1人1200ms
-      const rouletteTime = (Math.max(0, members.length - 1) * TIME_PER_PERSON) + TIME_LOCK;
-      // 待機時間 = ルーレット + リスト確認 + GAME START演出
-      const totalWaitTime = rouletteTime + TIME_LIST_WAIT + TIME_GAME_START;
+      // ★ 演出時間はホスト側でも十分な余裕を持つ
+      const playerCount = members.length;
+      const rouletteTime = (Math.max(0, playerCount - 1) * (TIME_SPIN + TIME_LOCK)) + TIME_LOCK;
+      const totalWaitTime = rouletteTime + TIME_LIST_WAIT + TIME_GAME_START + 2000; // バッファ+2秒
 
       // STEP 2: アニメーション終了後にゲーム開始へ
       setTimeout(async () => {
@@ -417,10 +442,9 @@ export const GameSetupScreen = () => {
 
   // ★ ロビー表示用にホストを先頭にソート
   const displayMembers = [...members].sort((a, b) => {
-    // ホストなら -1 (先頭へ)
     if (a.isHost && !b.isHost) return -1;
     if (!a.isHost && b.isHost) return 1;
-    return 0; // その他の順番は維持
+    return 0; 
   });
 
   return (
