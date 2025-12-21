@@ -19,6 +19,203 @@ const shuffleArray = (array: any[]) => {
   return newArray;
 };
 
+// --- 演出設定定数 (ミリ秒) ---
+const TIME_SPIN = 800;          // 回転時間
+const TIME_LOCK = 1200;         // 確定表示時間
+const TIME_PER_PERSON = 2000;   // 1人あたりの合計 (800+1200)
+const TIME_LIST_WAIT = 4000;    // 全員決定後のリスト確認時間
+const TIME_GAME_START = 6000;   // ★変更: GAME START 表示時間を6秒に延長
+
+// --- 順次ルーレット演出用コンポーネント ---
+const EliminationRouletteOverlay = ({ finalMembers }: { finalMembers: any[] }) => {
+  const [confirmedList, setConfirmedList] = useState<any[]>([]);
+  const [currentRound, setCurrentRound] = useState(0);
+  
+  const [displayAvatar, setDisplayAvatar] = useState('?');
+  const [displayName, setDisplayName] = useState('');
+  
+  // init -> spinning -> locked -> (repeat) -> finished -> gamestart
+  const [phase, setPhase] = useState<'init' | 'spinning' | 'locked' | 'finished' | 'gamestart'>('init');
+
+  // 初期化
+  useEffect(() => {
+    if (finalMembers.length > 0 && phase === 'init') {
+      setPhase('spinning');
+    }
+  }, [finalMembers, phase]);
+
+  // アニメーション制御
+  useEffect(() => {
+    if (phase === 'init' || phase === 'gamestart') return;
+
+    // --- 全員終わったか判定 ---
+    if (currentRound >= finalMembers.length) {
+      if (phase !== 'finished') {
+        setPhase('finished');
+        // リスト確認時間後に GAME START へ
+        setTimeout(() => {
+          setPhase('gamestart');
+        }, TIME_LIST_WAIT);
+      }
+      return;
+    }
+
+    const targetMember = finalMembers[currentRound];
+    // まだ決まっていない人たち（演出用プール）
+    const candidates = finalMembers.slice(currentRound);
+
+    let intervalId: NodeJS.Timeout;
+    let timerId: NodeJS.Timeout;
+
+    if (phase === 'spinning') {
+      // 最後の1人は回転なしで即確定
+      if (candidates.length <= 1) {
+        setDisplayAvatar(targetMember.avatar);
+        setDisplayName(targetMember.name);
+        setPhase('locked');
+        return;
+      }
+
+      let elapsed = 0;
+      const tick = 50;
+
+      intervalId = setInterval(() => {
+        const randomMember = candidates[Math.floor(Math.random() * candidates.length)];
+        setDisplayAvatar(randomMember.avatar);
+        setDisplayName("..."); 
+        elapsed += tick;
+
+        if (elapsed >= TIME_SPIN) {
+          clearInterval(intervalId);
+          setDisplayAvatar(targetMember.avatar);
+          setDisplayName(targetMember.name);
+          setPhase('locked');
+        }
+      }, tick);
+
+      return () => clearInterval(intervalId);
+
+    } else if (phase === 'locked') {
+      // 確定表示して次へ
+      timerId = setTimeout(() => {
+        setConfirmedList(prev => {
+           // 重複防止
+           if(prev.find(m => m.id === targetMember.id)) return prev;
+           return [...prev, targetMember];
+        });
+        setCurrentRound(prev => prev + 1);
+        setPhase('spinning');
+      }, TIME_LOCK);
+
+      return () => clearTimeout(timerId);
+    }
+
+  }, [phase, currentRound, finalMembers]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      exit={{ opacity: 0 }} 
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl p-4 overflow-hidden"
+    >
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-900/20 via-black to-black animate-pulse"></div>
+      
+      {/* GAME START Animation */}
+      <AnimatePresence>
+        {phase === 'gamestart' && (
+          <motion.div 
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 1.5, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0.5, duration: 0.8 }}
+            className="absolute inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md"
+          >
+            <div className="relative transform rotate-[-5deg]">
+              <div className="absolute inset-0 bg-cyan-500 blur-[80px] opacity-60 animate-pulse"></div>
+              <h1 className="relative text-7xl md:text-9xl font-black italic tracking-tighter text-white drop-shadow-[0_0_30px_rgba(6,182,212,0.8)] border-y-8 border-cyan-500 py-6 px-12 bg-black">
+                GAME<br/><span className="text-cyan-400">START</span>
+              </h1>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ルーレット画面 */}
+      {phase !== 'gamestart' && phase !== 'init' && (
+        <>
+          {/* タイトル */}
+          <div className="relative z-10 mb-4 text-center flex-none h-16">
+            {phase !== 'finished' ? (
+              <>
+                <h2 className="text-cyan-500 font-mono tracking-[0.5em] text-xs animate-pulse mb-2">DECIDING ORDER</h2>
+                <div className="text-4xl font-black text-white italic tracking-tighter">
+                    <span className="text-yellow-500 mr-2">#{currentRound + 1}</span>PLAYER
+                </div>
+              </>
+            ) : (
+              <h2 className="text-yellow-500 font-black tracking-widest text-3xl animate-bounce mt-4">ORDER FIXED!</h2>
+            )}
+          </div>
+
+          {/* ルーレット本体 (全て終わったら消す) */}
+          {phase !== 'finished' && (
+            <div className="relative z-10 flex flex-col items-center justify-center flex-none mb-6">
+              <motion.div 
+                key={phase === 'locked' ? 'locked' : 'spinning'}
+                animate={phase === 'locked' ? { scale: [1, 1.1, 1], borderColor: '#eab308', boxShadow: "0 0 50px rgba(234, 179, 8, 0.5)" } : { scale: 1, borderColor: 'rgba(6,182,212,0.3)' }}
+                className="relative w-32 h-32 md:w-40 md:h-40 rounded-full border-4 flex items-center justify-center overflow-hidden bg-black transition-colors duration-200"
+              >
+                <div className="text-6xl md:text-7xl select-none">{displayAvatar}</div>
+              </motion.div>
+              
+              <div className="h-10 mt-2 flex items-center justify-center">
+                {phase === 'locked' ? (
+                  <motion.div initial={{y:10, opacity:0}} animate={{y:0, opacity:1}} className="text-xl font-black text-white">{displayName}</motion.div>
+                ) : (
+                  <div className="text-xs text-gray-500 font-mono tracking-widest animate-pulse">SPINNING...</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 確定リスト */}
+          <motion.div 
+            animate={phase === 'finished' ? { scale: 1.1, y: -20 } : { scale: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="relative z-10 w-full max-w-md bg-white/5 border border-white/10 rounded-xl p-4 flex-1 overflow-hidden flex flex-col shadow-xl"
+          >
+            <h3 className="text-xs text-gray-400 font-mono tracking-widest mb-2 border-b border-white/10 pb-1 flex-none">TURN ORDER LIST</h3>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+              <AnimatePresence>
+                {confirmedList.map((member, index) => (
+                  <motion.div 
+                    key={member.id}
+                    initial={{ opacity: 0, x: -20, height: 0 }}
+                    animate={{ opacity: 1, x: 0, height: 'auto' }}
+                    className={`flex items-center gap-3 p-3 rounded-lg border ${index === 0 ? 'bg-gradient-to-r from-yellow-900/40 to-black border-yellow-500/50' : 'bg-black/40 border-white/10'}`}
+                  >
+                    <div className={`w-8 h-8 flex items-center justify-center rounded font-black text-sm ${index === 0 ? 'bg-yellow-500 text-black shadow-[0_0_10px_orange]' : 'bg-gray-700 text-gray-300'}`}>
+                      {index + 1}
+                    </div>
+                    <div className="text-xl">{member.avatar}</div>
+                    <div className={`font-bold ${index === 0 ? 'text-yellow-200' : 'text-gray-300'}`}>{member.name}</div>
+                    {index === 0 && <span className="ml-auto text-[10px] text-yellow-500 font-mono border border-yellow-500/30 px-2 py-0.5 rounded">LEADER</span>}
+                  </motion.div>
+                ))}
+                
+                {phase !== 'finished' && [...Array(Math.max(0, finalMembers.length - confirmedList.length))].map((_, i) => (
+                    <div key={`empty-${i}`} className="h-12 border border-white/5 rounded-lg border-dashed bg-white/5 opacity-20"></div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </motion.div>
+  );
+};
+
 export const GameSetupScreen = () => {
   const navigate = useNavigate();
   const { messages, addToast, removeToast } = useToast();
@@ -35,6 +232,8 @@ export const GameSetupScreen = () => {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [roomData, setRoomData] = useState<any>(null);
 
+  const [showRoulette, setShowRoulette] = useState(false);
+  const [finalOrderedMembers, setFinalOrderedMembers] = useState<any[]>([]);
   const isMounting = useRef(true);
 
   // --- 初期化 & 監視 ---
@@ -61,7 +260,12 @@ export const GameSetupScreen = () => {
         setMembers(data.members || []);
         if (data.mode) setGameMode(data.mode);
 
-        if (data.status === 'playing') {
+        if (data.status === 'roulette') {
+           setShowRoulette(true);
+           if (data.members && data.members.length > 0) {
+             setFinalOrderedMembers(data.members);
+           }
+        } else if (data.status === 'playing') {
           if (data.mode === 'free') navigate('/free');
           else navigate('/game-play');
         }
@@ -75,16 +279,14 @@ export const GameSetupScreen = () => {
     return () => unsubscribe();
   }, [navigate]);
 
-  // ★通知はすべてこのフック内で行われるため、ここでの追加ロジックは不要
   const { offlineUsers, isHostMissing } = usePresence(roomId, userId, roomData, addToast);
 
-  // --- 自動復帰ロジック (Self-Healing) ---
+  // --- 自動復帰ロジック ---
   useEffect(() => {
     if (isHost || !roomId || !userId || !roomData || roomClosed) return;
     const amIMember = members.some(m => m.id === userId);
 
     if (!amIMember && !isMounting.current) {
-       console.log("Detect: Removed from member list. Attempting to rejoin...");
        const rejoin = async () => {
          try {
            const roomRef = doc(db, "rooms", roomId);
@@ -103,7 +305,7 @@ export const GameSetupScreen = () => {
     }
   }, [members, isHost, roomId, userId, roomData, roomClosed, userName, userAvatar]);
 
-  // オフラインゲスト自動削除 (ホストのみ)
+  // オフラインゲスト自動削除
   useEffect(() => {
     if (!isHost || offlineUsers.size === 0 || !members.length) return;
     const kickOfflineUsers = async () => {
@@ -118,7 +320,6 @@ export const GameSetupScreen = () => {
     kickOfflineUsers();
   }, [isHost, offlineUsers, members, roomId]);
 
-  // ... (以下、handleShare, toggleReady, handleStart などの関数は変更なし)
   const handleShare = async () => {
     const url = `${window.location.origin}/?room=${roomId}`;
     try {
@@ -152,18 +353,41 @@ export const GameSetupScreen = () => {
         addToast("エラー：お題が見つかりません");
         return;
       }
+      
       const pool = themesSnap.data().list;
       let deck = shuffleArray(pool);
-      const membersWithChallenge = members.map(m => {
+      // シャッフルして順番を確定
+      const shuffledMembers = shuffleArray(members);
+
+      const membersWithChallenge = shuffledMembers.map(m => {
         if (deck.length === 0) deck = shuffleArray(pool);
         const challenge = deck.pop();
         return { ...m, challenge: challenge };
       });
+
       const roomRef = doc(db, "rooms", roomId);
+      
+      // STEP 1: ルーレット開始
       await updateDoc(roomRef, { 
-        members: membersWithChallenge, themePool: pool, deck: deck,     
-        status: 'playing', currentTurnIndex: 0, turnCount: 1
+        members: membersWithChallenge, 
+        themePool: pool, 
+        deck: deck,      
+        status: 'roulette', 
+        currentTurnIndex: 0, 
+        turnCount: 1
       });
+
+      // ★ 演出時間の計算
+      // ルーレット時間: (人数-1) * 2000ms + 最後の1人1200ms
+      const rouletteTime = (Math.max(0, members.length - 1) * TIME_PER_PERSON) + TIME_LOCK;
+      // 待機時間 = ルーレット + リスト確認 + GAME START演出
+      const totalWaitTime = rouletteTime + TIME_LIST_WAIT + TIME_GAME_START;
+
+      // STEP 2: アニメーション終了後にゲーム開始へ
+      setTimeout(async () => {
+        await updateDoc(roomRef, { status: 'playing' });
+      }, totalWaitTime);
+
     } catch (error) {
       console.error("Error starting game:", error);
       addToast("開始に失敗しました");
@@ -191,12 +415,26 @@ export const GameSetupScreen = () => {
   const handleRoomClosedConfirm = () => { localStorage.removeItem('shibari_user_info'); navigate('/'); };
   const handleChangeMode = () => navigate('/menu');
 
+  // ★ ロビー表示用にホストを先頭にソート
+  const displayMembers = [...members].sort((a, b) => {
+    // ホストなら -1 (先頭へ)
+    if (a.isHost && !b.isHost) return -1;
+    if (!a.isHost && b.isHost) return 1;
+    return 0; // その他の順番は維持
+  });
+
   return (
     <div className="w-full h-screen flex flex-col items-center relative overflow-hidden">
       <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
         <div className={`absolute top-[-20%] right-[-10%] w-[60vw] h-[60vw] blur-[120px] rounded-full mix-blend-screen opacity-40 animate-pulse ${gameMode === 'free' ? 'bg-blue-900' : 'bg-cyan-900'}`}></div>
       </div>
       <Toast messages={messages} onRemove={removeToast} />
+      
+      {/* ルーレットオーバーレイ */}
+      <AnimatePresence>
+        {showRoulette && <EliminationRouletteOverlay finalMembers={finalOrderedMembers} />}
+      </AnimatePresence>
+
       <div className="w-full max-w-6xl flex flex-col h-full px-4 py-8 md:py-12 relative z-10">
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-4">
@@ -214,11 +452,12 @@ export const GameSetupScreen = () => {
           </div>
           <button onClick={() => setShowLeaveModal(true)} className="px-4 py-2 rounded-full border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-bold tracking-widest transition-colors">LEAVE ROOM</button>
         </div>
-        {/* Members */}
+        
+        {/* Members (Sort済みの displayMembers を使用) */}
         <div className="flex-1 overflow-y-auto mb-8 pr-2 custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence>
-              {members.map((member, index) => (
+              {displayMembers.map((member, index) => (
                 <motion.div key={member.id} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }} transition={{ delay: index * 0.1 }} className={`backdrop-blur-sm border rounded-xl p-4 flex items-center gap-4 transition-all duration-300 ${member.isReady ? 'bg-cyan-900/30 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'bg-black/40 border-white/10'}`}>
                   <div className={`w-12 h-12 rounded-full border flex items-center justify-center text-2xl ${member.isReady ? 'bg-cyan-500/20 border-cyan-400 shadow-[0_0_10px_cyan]' : 'bg-white/5 border-white/20'}`}>{member.avatar}</div>
                   <div className="flex-1">
@@ -230,12 +469,13 @@ export const GameSetupScreen = () => {
                   </div>
                 </motion.div>
               ))}
-              {[...Array(Math.max(0, 4 - members.length))].map((_, i) => (
+              {[...Array(Math.max(0, 4 - displayMembers.length))].map((_, i) => (
                 <div key={`empty-${i}`} className="border border-white/5 rounded-xl p-4 flex items-center gap-4 opacity-30 border-dashed"><div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl animate-pulse">?</div><p className="text-sm font-mono tracking-widest text-white/50">WAITING...</p></div>
               ))}
             </AnimatePresence>
           </div>
         </div>
+        
         {/* Footer */}
         <div className="h-24 flex items-center justify-center relative z-50">
           {isHost ? (
@@ -250,7 +490,8 @@ export const GameSetupScreen = () => {
           )}
         </div>
       </div>
-      {/* Modals（省略なしでそのまま維持） */}
+      
+      {/* Modals */}
       <AnimatePresence>
         {showLeaveModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
