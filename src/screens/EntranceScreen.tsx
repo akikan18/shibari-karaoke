@@ -18,7 +18,7 @@ const cardVariants = { hidden: { y: 100, opacity: 0, rotateX: 20 }, show: { y: 0
 export const EntranceScreen = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  
+
   // UI State
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -30,79 +30,43 @@ export const EntranceScreen = () => {
   const [reconnectData, setReconnectData] = useState<any>(null);
 
   // Navigation
-  const [targetPath, setTargetPath] = useState<string>(''); 
-  const [isHostMode, setIsHostMode] = useState(false); 
+  const [targetPath, setTargetPath] = useState<string>('');
+  const [isHostMode, setIsHostMode] = useState(false);
 
   // User Data
   const [userName, setUserName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
   const [roomIdInput, setRoomIdInput] = useState('');
 
-  // 実行管理用Ref
   const hasProcessedInvite = useRef(false);
 
-  // --- 修正箇所1: URLパラメータチェック & 自動接続 ---
+  // ★修正: 招待URLがあっても、まず自分のローカル情報をチェックし、既存メンバーなら復帰させる
   useEffect(() => {
-    const roomParam = searchParams.get('room');
-    
-    // パラメータがあり、まだ処理していない場合のみ実行
-    if (roomParam && !hasProcessedInvite.current) {
-      console.log("Invite Detected:", roomParam);
-      hasProcessedInvite.current = true;
-      setRoomIdInput(roomParam);
+    const checkStatus = async () => {
+      const roomParam = searchParams.get('room');
       
-      const autoCheck = async () => {
-         setIsProcessing(true);
-         try {
-             // 0.5秒待機
-             await new Promise(r => setTimeout(r, 500));
-
-             const roomRef = doc(db, "rooms", roomParam);
-             const roomSnap = await getDoc(roomRef);
-
-             if (roomSnap.exists()) {
-                const data = roomSnap.data();
-                if (data.status === 'playing') {
-                   setShowMidGameModal(true);
-                } else {
-                   setTargetPath('/game-setup');
-                   setIsHostMode(false);
-                   setShowProfileModal(true);
-                }
-             } else {
-                setErrorMsg("招待されたルームが見つかりません。\nIDが間違っているか、解散された可能性があります。");
-             }
-         } catch (e) {
-             console.error(e);
-             setErrorMsg("通信エラーが発生しました。\nネットワーク接続を確認してください。");
-         } finally {
-             setIsProcessing(false);
-         }
-      };
-      autoCheck();
-    }
-  }, [searchParams]);
-
-  // --- 修正箇所2: 再接続チェック (招待リンク時はスキップ) ---
-  useEffect(() => {
-    // 招待リンク処理が走った場合は、再接続ロジックは実行しない
-    if (searchParams.get('room') || hasProcessedInvite.current) return;
-
-    const checkReconnection = async () => {
+      // 1. ローカル情報の確認
       const stored = localStorage.getItem('shibari_user_info');
       if (stored) {
         const userInfo = JSON.parse(stored);
         try {
           const roomRef = doc(db, "rooms", userInfo.roomId);
           const roomSnap = await getDoc(roomRef);
+
           if (roomSnap.exists()) {
             const data = roomSnap.data();
             const isMember = data.members?.some((m: any) => m.id === userInfo.userId);
-            if (isMember) {
+
+            // もし「招待URLの部屋」と「保存されている部屋」が同じなら、それはリロード復帰とみなす
+            const isSameRoom = roomParam ? (roomParam === userInfo.roomId) : true;
+
+            if (isMember && isSameRoom) {
               setReconnectData({ ...userInfo, status: data.status, mode: data.mode });
               setShowReconnectModal(true);
+              return; // ここで終了（招待処理には進まない）
             } else {
-              localStorage.removeItem('shibari_user_info');
+               // 部屋が違う、またはメンバーリストにいない場合は情報をクリア
+               if (isSameRoom) localStorage.removeItem('shibari_user_info');
             }
           } else {
             localStorage.removeItem('shibari_user_info');
@@ -111,9 +75,41 @@ export const EntranceScreen = () => {
           console.error("Reconnect check failed", e);
         }
       }
+
+      // 2. 招待URLの処理 (再接続でなければ)
+      if (roomParam && !hasProcessedInvite.current) {
+        hasProcessedInvite.current = true;
+        setRoomIdInput(roomParam);
+
+        setIsProcessing(true);
+        try {
+          await new Promise(r => setTimeout(r, 500));
+          const roomRef = doc(db, "rooms", roomParam);
+          const roomSnap = await getDoc(roomRef);
+
+          if (roomSnap.exists()) {
+            const data = roomSnap.data();
+            if (data.status === 'playing') {
+              setShowMidGameModal(true);
+            } else {
+              setTargetPath('/game-setup');
+              setIsHostMode(false);
+              setShowProfileModal(true);
+            }
+          } else {
+            setErrorMsg("招待されたルームが見つかりません。\nIDが間違っているか、解散された可能性があります。");
+          }
+        } catch (e) {
+          console.error(e);
+          setErrorMsg("通信エラーが発生しました。\nネットワーク接続を確認してください。");
+        } finally {
+          setIsProcessing(false);
+        }
+      }
     };
-    checkReconnection();
-  }, []); // searchParamsに依存させない
+
+    checkStatus();
+  }, [searchParams]);
 
   const handleReconnect = () => {
     if (!reconnectData) return;
@@ -142,21 +138,18 @@ export const EntranceScreen = () => {
     }
   };
 
-  // --- 接続開始 (手動) ---
   const handleStartClick = async (e: React.MouseEvent, path: string, isHost: boolean) => {
     e.preventDefault();
-    
-    // ホスト
+
     if (isHost) {
       setIsProcessing(true);
       try {
         const themesRef = doc(db, "system", "themes");
         const snap = await getDoc(themesRef);
-        
         if (!snap.exists() || !snap.data().list || snap.data().list.length < 5) {
-           setErrorMsg("お題が不足しています。\n「MANAGE TOPICS」から\n最低5個のお題を作成してください。");
-           setIsProcessing(false);
-           return;
+          setErrorMsg("お題が不足しています。\n「MANAGE TOPICS」から\n最低5個のお題を作成してください。");
+          setIsProcessing(false);
+          return;
         }
       } catch (err) {
         setErrorMsg("通信エラー: お題データの確認に失敗しました");
@@ -164,14 +157,13 @@ export const EntranceScreen = () => {
         return;
       }
       setIsProcessing(false);
-      
+
       setTargetPath(path);
       setIsHostMode(isHost);
       setShowProfileModal(true);
       return;
     }
 
-    // ゲスト
     if (!roomIdInput.trim() || roomIdInput.length !== 4) {
       setErrorMsg("ルームIDは4桁の数字を入力してください");
       return;
@@ -208,12 +200,11 @@ export const EntranceScreen = () => {
 
   const confirmMidGameJoin = () => {
     setShowMidGameModal(false);
-    setTargetPath('/game-setup'); 
+    setTargetPath('/game-setup');
     setIsHostMode(false);
     setShowProfileModal(true);
   };
 
-  // --- プロフィール確定 & 参加 ---
   const handleConfirmProfile = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!userName.trim()) return;
@@ -226,7 +217,6 @@ export const EntranceScreen = () => {
       let finalRoomId = roomIdInput;
 
       if (isHostMode) {
-        // --- HOST ---
         let isCreated = false;
         let retryCount = 0;
         while (!isCreated && retryCount < 5) {
@@ -265,20 +255,40 @@ export const EntranceScreen = () => {
         }
         if (!isCreated) throw new Error("空き部屋が見つかりませんでした。");
       } else {
-        // --- GUEST ---
         const roomRef = doc(db, "rooms", finalRoomId);
-        const newMember = {
-          id: userId,
-          name: userName,
-          avatar: selectedAvatar,
-          isHost: false,
-          isReady: false, 
-          joinedAt: Date.now()
-        };
-        await updateDoc(roomRef, {
-          members: arrayUnion(newMember),
-          [`heartbeats.${userId}`]: serverTimestamp()
-        });
+        
+        // ★修正: 既存メンバーかどうかチェックし、既存なら上書き更新にする
+        const roomSnap = await getDoc(roomRef);
+        if (roomSnap.exists()) {
+            const data = roomSnap.data();
+            const existingMember = data.members?.find((m: any) => m.id === userId);
+            
+            if (existingMember) {
+                 const updatedMembers = data.members.map((m: any) => {
+                     if (m.id === userId) {
+                         return { ...m, name: userName, avatar: selectedAvatar, joinedAt: Date.now() };
+                     }
+                     return m;
+                 });
+                 await updateDoc(roomRef, {
+                    members: updatedMembers,
+                    [`heartbeats.${userId}`]: serverTimestamp()
+                 });
+            } else {
+                const newMember = {
+                    id: userId,
+                    name: userName,
+                    avatar: selectedAvatar,
+                    isHost: false,
+                    isReady: false,
+                    joinedAt: Date.now()
+                };
+                await updateDoc(roomRef, {
+                    members: arrayUnion(newMember),
+                    [`heartbeats.${userId}`]: serverTimestamp()
+                });
+            }
+        }
       }
 
       const userInfo = {
@@ -299,6 +309,7 @@ export const EntranceScreen = () => {
     }
   };
 
+  // ... (JSXは変更なし)
   return (
     <div className="w-full min-h-[80vh] text-white overflow-hidden relative flex flex-col items-center justify-center py-10">
       <div className="absolute inset-0 pointer-events-none">
@@ -368,12 +379,12 @@ export const EntranceScreen = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setErrorMsg(null)} />
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-sm bg-[#0f172a] border border-red-500/50 rounded-2xl shadow-[0_0_30px_rgba(220,38,38,0.3)] overflow-hidden p-1 z-[101]">
-               <div className="bg-gradient-to-b from-red-900/20 to-black p-6 rounded-xl flex flex-col items-center text-center gap-4">
-                  <div className="text-3xl">⚠️</div>
-                  <h3 className="text-lg font-black text-red-400 tracking-widest">ERROR</h3>
-                  <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{errorMsg}</p>
-                  <button onClick={() => setErrorMsg(null)} className="mt-2 w-full py-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold tracking-widest text-xs transition-colors">CLOSE</button>
-               </div>
+              <div className="bg-gradient-to-b from-red-900/20 to-black p-6 rounded-xl flex flex-col items-center text-center gap-4">
+                <div className="text-3xl">⚠️</div>
+                <h3 className="text-lg font-black text-red-400 tracking-widest">ERROR</h3>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{errorMsg}</p>
+                <button onClick={() => setErrorMsg(null)} className="mt-2 w-full py-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold tracking-widest text-xs transition-colors">CLOSE</button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -383,11 +394,11 @@ export const EntranceScreen = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-sm bg-[#0f172a] border border-cyan-500/50 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.3)] p-1 z-[101]">
-               <div className="bg-gradient-to-b from-cyan-900/20 to-black p-8 flex flex-col items-center text-center gap-4">
-                  <div className="text-4xl">🔄</div>
-                  <div><h2 className="text-xl font-black text-cyan-400 tracking-widest">RECONNECT?</h2><p className="text-gray-400 text-sm font-mono mt-2">参加中のゲームが見つかりました。<br/>再接続しますか？</p></div>
-                  <div className="flex w-full gap-2 mt-4"><button onClick={cancelReconnect} className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-gray-400 font-bold tracking-widest text-xs">NO</button><button onClick={handleReconnect} className="flex-1 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold tracking-widest text-xs shadow-lg shadow-cyan-900/50">YES</button></div>
-               </div>
+              <div className="bg-gradient-to-b from-cyan-900/20 to-black p-8 flex flex-col items-center text-center gap-4">
+                <div className="text-4xl">🔄</div>
+                <div><h2 className="text-xl font-black text-cyan-400 tracking-widest">RECONNECT?</h2><p className="text-gray-400 text-sm font-mono mt-2">参加中のゲームが見つかりました。<br/>再接続しますか？</p></div>
+                <div className="flex w-full gap-2 mt-4"><button onClick={cancelReconnect} className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-gray-400 font-bold tracking-widest text-xs">NO</button><button onClick={handleReconnect} className="flex-1 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold tracking-widest text-xs shadow-lg shadow-cyan-900/50">YES</button></div>
+              </div>
             </motion.div>
           </div>
         )}
@@ -398,11 +409,11 @@ export const EntranceScreen = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={() => setShowMidGameModal(false)} />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-sm bg-[#0f172a] border border-yellow-500/50 rounded-2xl shadow-[0_0_50px_rgba(234,179,8,0.3)] p-1 z-[101]">
-               <div className="bg-gradient-to-b from-yellow-900/20 to-black p-8 flex flex-col items-center text-center gap-4">
-                  <div className="text-4xl">🎮</div>
-                  <div><h2 className="text-xl font-black text-yellow-400 tracking-widest">GAME IN PROGRESS</h2><p className="text-gray-400 text-sm font-mono mt-2">現在ゲームが進行中です。<br/>新規プレイヤーとして途中参加しますか？</p></div>
-                  <div className="flex w-full gap-2 mt-4"><button onClick={() => setShowMidGameModal(false)} className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-gray-400 font-bold tracking-widest text-xs">CANCEL</button><button onClick={confirmMidGameJoin} className="flex-1 py-3 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white font-bold tracking-widest text-xs shadow-lg shadow-yellow-900/50">JOIN</button></div>
-               </div>
+              <div className="bg-gradient-to-b from-yellow-900/20 to-black p-8 flex flex-col items-center text-center gap-4">
+                <div className="text-4xl">🎮</div>
+                <div><h2 className="text-xl font-black text-yellow-400 tracking-widest">GAME IN PROGRESS</h2><p className="text-gray-400 text-sm font-mono mt-2">現在ゲームが進行中です。<br/>新規プレイヤーとして途中参加しますか？</p></div>
+                <div className="flex w-full gap-2 mt-4"><button onClick={() => setShowMidGameModal(false)} className="flex-1 py-3 rounded-lg bg-white/5 border border-white/10 text-gray-400 font-bold tracking-widest text-xs">CANCEL</button><button onClick={confirmMidGameJoin} className="flex-1 py-3 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white font-bold tracking-widest text-xs shadow-lg shadow-yellow-900/50">JOIN</button></div>
+              </div>
             </motion.div>
           </div>
         )}

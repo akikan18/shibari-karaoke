@@ -107,11 +107,42 @@ export const GameSetupScreen = () => {
 
   const { offlineUsers, isHostMissing } = usePresence(roomId, userId, roomData, addToast);
 
-  // --- 自動復帰ロジック ---
+  // ★追加: リロード時にFirestore上の自分の情報を更新して「生きている」ことを主張する
+  // これにより、Host側の「この人昔からいるけどオフラインだから消そう」という判定を回避します
+  useEffect(() => {
+    if (!roomId || !userId || !members.length) return;
+    
+    // 自分がリストにいるか確認
+    const myData = members.find(m => m.id === userId);
+    if (myData) {
+        // joinedAt を更新する
+        const updatePresence = async () => {
+            try {
+                const roomRef = doc(db, "rooms", roomId);
+                const updatedMembers = members.map(m => {
+                    if (m.id === userId) {
+                        return { ...m, joinedAt: Date.now() };
+                    }
+                    return m;
+                });
+                // 無駄な書き込みを防ぐため、joinedAtが極端に古い場合のみ更新などしたいが、
+                // リロード時の生存報告として一度実行するのは安全
+                if (Date.now() - (myData.joinedAt || 0) > 5000) {
+                    await updateDoc(roomRef, { members: updatedMembers });
+                }
+            } catch (e) { console.error("Self-update failed", e); }
+        };
+        updatePresence();
+    }
+  }, [roomId, userId, members.length]); // membersの中身が変わるたびには走らせないため length 依存
+
+  // --- 自動復帰ロジック (Firestoreに自分がいない場合の復帰) ---
   useEffect(() => {
     if (isHost || !roomId || !userId || !roomData || roomClosed) return;
     const amIMember = members.some(m => m.id === userId);
 
+    // リロード直後などは members が空の可能性があるので少し待つ制御を入れるのが理想だが
+    // isMounting.current で制御しているためOK
     if (!amIMember && !isMounting.current) {
        const rejoin = async () => {
          try {
@@ -136,8 +167,11 @@ export const GameSetupScreen = () => {
     if (!isHost || !members.length || offlineUsers.size === 0) return;
 
     const now = Date.now();
-    // ★ 500ms猶予 (短めに設定し、かつ削除処理がUI表示と干渉しないように注意)
-    const CONNECTION_GRACE = 500; 
+    
+    // ★重要変更: 猶予時間を 500ms -> 5000ms (5秒) に延長
+    // UI上は offlineUsers に入った瞬間に非表示になるため、ユーザー体験としての「即消え」は担保される。
+    // データ削除を遅らせることで、リロード時の「一瞬オフライン」で消されるのを防ぐ。
+    const CONNECTION_GRACE = 5000;
 
     const membersToKeep = [];
     let needsUpdate = false;
@@ -148,11 +182,16 @@ export const GameSetupScreen = () => {
         membersToKeep.push(member);
         continue;
       }
+      
+      // オフラインの場合
       const joinedAt = member.joinedAt || 0;
       const elapsed = now - joinedAt;
+
       if (elapsed > CONNECTION_GRACE) {
+        // 猶予時間を過ぎた -> 本当に削除
         needsUpdate = true;
       } else {
+        // まだ猶予中 -> データは残す
         membersToKeep.push(member);
         const remaining = CONNECTION_GRACE - elapsed + 100;
         if (pendingKickTime === null || remaining < pendingKickTime) {
@@ -181,6 +220,7 @@ export const GameSetupScreen = () => {
 
   const [refreshTick, setRefreshTick] = useState(0);
 
+  // ... (handleShare 以降は変更なし)
   const handleShare = async () => {
     const baseUrl = window.location.href.split('#')[0];
     const shareUrl = `${baseUrl}#/?room=${roomId}`;
@@ -214,15 +254,19 @@ export const GameSetupScreen = () => {
         addToast("エラー：お題が見つかりません");
         return;
       }
+      
       const pool = themesSnap.data().list;
       let deck = shuffleArray(pool);
       const shuffledMembers = shuffleArray(members);
+
       const membersWithChallenge = shuffledMembers.map(m => {
         if (deck.length === 0) deck = shuffleArray(pool);
         const challenge = deck.pop();
         return { ...m, challenge: challenge };
       });
+
       const roomRef = doc(db, "rooms", roomId);
+      
       await updateDoc(roomRef, { 
         members: membersWithChallenge, 
         themePool: pool, 
@@ -231,12 +275,15 @@ export const GameSetupScreen = () => {
         currentTurnIndex: 0, 
         turnCount: 1
       });
+
       const playerCount = members.length;
       const rouletteTime = (Math.max(0, playerCount - 1) * (TIME_SPIN + TIME_LOCK)) + TIME_LOCK;
       const totalWaitTime = rouletteTime + TIME_LIST_WAIT + TIME_GAME_START + 2000; 
+
       setTimeout(async () => {
         await updateDoc(roomRef, { status: 'playing' });
       }, totalWaitTime);
+
     } catch (error) {
       console.error("Error starting game:", error);
       addToast("開始に失敗しました");
@@ -270,11 +317,12 @@ export const GameSetupScreen = () => {
     return 0; 
   });
 
-  // 見た目の即時削除用
+  // 見た目上は、オフラインのユーザーを即座に消す (visibleMembersを使用)
   const visibleMembers = displayMembers.filter(m => !offlineUsers.has(m.id));
 
   return (
     <div className="w-full h-screen flex flex-col items-center relative overflow-hidden">
+      {/* ... (省略なしで記述) */}
       <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
         <div className={`absolute top-[-20%] right-[-10%] w-[60vw] h-[60vw] blur-[120px] rounded-full mix-blend-screen opacity-40 animate-pulse ${gameMode === 'free' ? 'bg-blue-900' : 'bg-cyan-900'}`}></div>
       </div>
@@ -285,6 +333,7 @@ export const GameSetupScreen = () => {
       </AnimatePresence>
 
       <div className="w-full max-w-6xl flex flex-col h-full px-4 py-8 md:py-12 relative z-10">
+        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-4">
           <div className="flex-1">
             <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-200 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">LOBBY</h1>
@@ -301,19 +350,12 @@ export const GameSetupScreen = () => {
           <button onClick={() => setShowLeaveModal(true)} className="px-4 py-2 rounded-full border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-bold tracking-widest transition-colors">LEAVE ROOM</button>
         </div>
         
+        {/* Members */}
         <div className="flex-1 overflow-y-auto mb-8 pr-2 custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence mode="popLayout">
               {visibleMembers.map((member, index) => (
-                <motion.div 
-                  key={member.id} 
-                  layout="position"
-                  initial={{ opacity: 0, scale: 0.9 }} 
-                  animate={{ opacity: 1, scale: 1 }} 
-                  exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }} 
-                  transition={{ layout: { duration: 0.3 } }}
-                  className={`backdrop-blur-sm border rounded-xl p-4 flex items-center gap-4 ${member.isReady ? 'bg-cyan-900/30 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'bg-black/40 border-white/10'}`}
-                >
+                <motion.div key={member.id} layout="position" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }} transition={{ layout: { duration: 0.3 } }} className={`backdrop-blur-sm border rounded-xl p-4 flex items-center gap-4 ${member.isReady ? 'bg-cyan-900/30 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'bg-black/40 border-white/10'}`}>
                   <div className={`w-12 h-12 rounded-full border flex items-center justify-center text-2xl ${member.isReady ? 'bg-cyan-500/20 border-cyan-400 shadow-[0_0_10px_cyan]' : 'bg-white/5 border-white/20'}`}>{member.avatar}</div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -331,6 +373,7 @@ export const GameSetupScreen = () => {
           </div>
         </div>
         
+        {/* Footer */}
         <div className="h-24 flex items-center justify-center relative z-50">
           {isHost ? (
             <button type="button" onClick={handleStart} disabled={!allReady} className={`group relative px-12 py-4 rounded-full font-black text-xl tracking-[0.2em] transition-all ${allReady ? 'hover:scale-105 active:scale-95 cursor-pointer ' + (gameMode === 'free' ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_30px_rgba(37,99,235,0.5)]' : 'bg-white text-black hover:bg-cyan-50 shadow-[0_0_30px_rgba(6,182,212,0.5)]') : 'bg-gray-800 text-gray-500 cursor-not-allowed border border-white/10 opacity-50'}`}>
@@ -345,6 +388,7 @@ export const GameSetupScreen = () => {
         </div>
       </div>
       
+      {/* Modals (省略なし) */}
       <AnimatePresence>
         {showLeaveModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
