@@ -9,7 +9,7 @@ import { auth, db } from '../firebase';
 
 const AVATARS = ['🎤', '🎸', '🎹', '🥁', '🎷', '🎧', '👑', '🎩', '🐶', '🐱', '🦁', '🐼', '🐯', '👽', '👻', '🤖'];
 
-// --- Animation Config (省略なし) ---
+// --- Animation Config ---
 const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.3, delayChildren: 0.5 } } };
 const titleItemVariants = { hidden: { y: 50, opacity: 0, filter: 'blur(10px)' }, show: { y: 0, opacity: 1, filter: 'blur(0px)', transition: { type: "spring", stiffness: 100 } } };
 const lineVariants = { hidden: { scaleX: 0, opacity: 0 }, show: { scaleX: 1, opacity: 0.6, transition: { duration: 0.8, ease: "circOut" } } };
@@ -38,9 +38,10 @@ export const EntranceScreen = () => {
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
   const [roomIdInput, setRoomIdInput] = useState('');
 
-  // --- 0. URLパラメータチェック & 自動接続 ---
+  // --- 修正箇所1: URLパラメータチェック & 自動接続 ---
   useEffect(() => {
     const roomParam = searchParams.get('room');
+    // IDが4桁の数字の場合のみ処理開始（形式チェックも元のロジックに合わせつつ、elseを追加）
     if (roomParam && /^[0-9]{4}$/.test(roomParam)) {
       setRoomIdInput(roomParam);
       
@@ -49,6 +50,7 @@ export const EntranceScreen = () => {
          try {
              const roomRef = doc(db, "rooms", roomParam);
              const roomSnap = await getDoc(roomRef);
+
              if (roomSnap.exists()) {
                 const data = roomSnap.data();
                 if (data.status === 'playing') {
@@ -59,9 +61,13 @@ export const EntranceScreen = () => {
                    setIsHostMode(false);
                    setShowProfileModal(true);
                 }
+             } else {
+                // ★ここが修正点: 部屋が見つからない場合のエラー表示を追加
+                setErrorMsg("招待されたルームが見つかりません。\nIDが間違っているか、解散された可能性があります。");
              }
          } catch (e) {
              console.error(e);
+             setErrorMsg("通信エラーが発生しました。\nネットワーク接続を確認してください。");
          } finally {
              setIsProcessing(false);
          }
@@ -70,8 +76,11 @@ export const EntranceScreen = () => {
     }
   }, [searchParams]);
 
-  // --- 1. 再接続チェック ---
+  // --- 修正箇所2: 再接続チェック (招待リンクがある場合はスキップ) ---
   useEffect(() => {
+    // ★招待リンクを踏んでいる場合は、再接続確認をしない
+    if (searchParams.get('room')) return;
+
     const checkReconnection = async () => {
       const stored = localStorage.getItem('shibari_user_info');
       if (stored) {
@@ -97,7 +106,7 @@ export const EntranceScreen = () => {
       }
     };
     checkReconnection();
-  }, []);
+  }, [searchParams]);
 
   const handleReconnect = () => {
     if (!reconnectData) return;
@@ -126,7 +135,7 @@ export const EntranceScreen = () => {
     }
   };
 
-  // --- 2. 接続開始 (事前チェック) ---
+  // --- 接続開始 (元のロジックを維持) ---
   const handleStartClick = async (e: React.MouseEvent, path: string, isHost: boolean) => {
     e.preventDefault();
     
@@ -197,7 +206,7 @@ export const EntranceScreen = () => {
     setShowProfileModal(true);
   };
 
-  // --- 3. プロフィール確定 & 参加 ---
+  // --- プロフィール確定 & 参加 (元のロジックを維持) ---
   const handleConfirmProfile = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!userName.trim()) return;
@@ -328,7 +337,7 @@ export const EntranceScreen = () => {
         </motion.div>
       </motion.div>
 
-      {/* --- Modals (Reconnect / MidGame / Profile / Error) は省略なしでそのまま維持 --- */}
+      {/* --- Modals --- */}
       <AnimatePresence>
         {showProfileModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -362,7 +371,6 @@ export const EntranceScreen = () => {
           </div>
         )}
       </AnimatePresence>
-      {/* Reconnect & MidGame モーダルはそのまま維持 */}
       <AnimatePresence>
         {showReconnectModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
