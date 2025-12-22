@@ -113,32 +113,37 @@ const { offlineUsers, isHostMissing } = usePresence(roomId, userId, roomData, ad
 // これによりゲストが勝手に消えることはありません。
 
 const handleNextGame = async () => {
-if (isProcessing) return;
-setIsProcessing(true);
-try {
-const roomRef = doc(db, "rooms", roomId);
-const roomSnap = await getDoc(roomRef);
-if (roomSnap.exists()) {
-const currentData = roomSnap.data();
-const resetMembers = (currentData.members || []).map((m: any) => ({
-...m,
-score: 0,
-isReady: m.isHost ? true : false,
-challenge: null
-}));
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+        const roomRef = doc(db, "rooms", roomId);
+        const roomSnap = await getDoc(roomRef);
+        if (roomSnap.exists()) {
+            const currentData = roomSnap.data();
 
-await updateDoc(roomRef, {
-status: 'waiting',
-currentTurnIndex: 0,
-turnCount: 1,
-currentChallenge: null,
-members: resetMembers
-});
-}
-} catch (error) {
-console.error("Error resetting game:", error);
-setIsProcessing(false);
-}
+            const resetMembers = (currentData.members || []).map((m: any) => ({
+                ...m,
+                score: 0,
+                isReady: (m.isHost || String(m.id).startsWith('guest_')) ? true : false,
+                challenge: null
+            }));
+
+            // --- 修正箇所: lastLog: null を追加 ---
+            await updateDoc(roomRef, {
+                status: 'waiting',
+                currentTurnIndex: 0,
+                turnCount: 1,
+                currentChallenge: null,
+                members: resetMembers,
+                lastLog: null,        // <--- ★これを追加！前回のログ履歴を消去する
+                jackpotState: null    // (念のため) JACKPOTの状態もリセットしておくと安全です
+            });
+            // ------------------------------------
+        }
+    } catch (error) {
+        console.error("Error resetting game:", error);
+        setIsProcessing(false);
+    }
 };
 
 const handleDisband = async () => {
