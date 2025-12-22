@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -38,16 +38,25 @@ export const EntranceScreen = () => {
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
   const [roomIdInput, setRoomIdInput] = useState('');
 
+  // 実行管理用Ref
+  const hasProcessedInvite = useRef(false);
+
   // --- 修正箇所1: URLパラメータチェック & 自動接続 ---
   useEffect(() => {
     const roomParam = searchParams.get('room');
-    // IDが4桁の数字の場合のみ処理開始（形式チェックも元のロジックに合わせつつ、elseを追加）
-    if (roomParam && /^[0-9]{4}$/.test(roomParam)) {
+    
+    // パラメータがあり、まだ処理していない場合のみ実行
+    if (roomParam && !hasProcessedInvite.current) {
+      console.log("Invite Detected:", roomParam);
+      hasProcessedInvite.current = true;
       setRoomIdInput(roomParam);
       
       const autoCheck = async () => {
          setIsProcessing(true);
          try {
+             // 0.5秒待機
+             await new Promise(r => setTimeout(r, 500));
+
              const roomRef = doc(db, "rooms", roomParam);
              const roomSnap = await getDoc(roomRef);
 
@@ -56,13 +65,11 @@ export const EntranceScreen = () => {
                 if (data.status === 'playing') {
                    setShowMidGameModal(true);
                 } else {
-                   // 自動的にゲスト参加としてモーダルを開く
                    setTargetPath('/game-setup');
                    setIsHostMode(false);
                    setShowProfileModal(true);
                 }
              } else {
-                // ★ここが修正点: 部屋が見つからない場合のエラー表示を追加
                 setErrorMsg("招待されたルームが見つかりません。\nIDが間違っているか、解散された可能性があります。");
              }
          } catch (e) {
@@ -76,10 +83,10 @@ export const EntranceScreen = () => {
     }
   }, [searchParams]);
 
-  // --- 修正箇所2: 再接続チェック (招待リンクがある場合はスキップ) ---
+  // --- 修正箇所2: 再接続チェック (招待リンク時はスキップ) ---
   useEffect(() => {
-    // ★招待リンクを踏んでいる場合は、再接続確認をしない
-    if (searchParams.get('room')) return;
+    // 招待リンク処理が走った場合は、再接続ロジックは実行しない
+    if (searchParams.get('room') || hasProcessedInvite.current) return;
 
     const checkReconnection = async () => {
       const stored = localStorage.getItem('shibari_user_info');
@@ -106,7 +113,7 @@ export const EntranceScreen = () => {
       }
     };
     checkReconnection();
-  }, [searchParams]);
+  }, []); // searchParamsに依存させない
 
   const handleReconnect = () => {
     if (!reconnectData) return;
@@ -135,11 +142,11 @@ export const EntranceScreen = () => {
     }
   };
 
-  // --- 接続開始 (元のロジックを維持) ---
+  // --- 接続開始 (手動) ---
   const handleStartClick = async (e: React.MouseEvent, path: string, isHost: boolean) => {
     e.preventDefault();
     
-    // ホストの場合
+    // ホスト
     if (isHost) {
       setIsProcessing(true);
       try {
@@ -164,7 +171,7 @@ export const EntranceScreen = () => {
       return;
     }
 
-    // ゲストの場合
+    // ゲスト
     if (!roomIdInput.trim() || roomIdInput.length !== 4) {
       setErrorMsg("ルームIDは4桁の数字を入力してください");
       return;
@@ -206,7 +213,7 @@ export const EntranceScreen = () => {
     setShowProfileModal(true);
   };
 
-  // --- プロフィール確定 & 参加 (元のロジックを維持) ---
+  // --- プロフィール確定 & 参加 ---
   const handleConfirmProfile = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!userName.trim()) return;
