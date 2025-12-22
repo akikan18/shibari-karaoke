@@ -30,7 +30,7 @@ const GAME_EVENTS = {
   [EVENT_TYPES.PENALTY]: { name: "ABYSS TRAP", desc: "FAILURE PENALTY -1000", color: "#a855f7", shadow: "rgba(168, 85, 247, 0.5)", bgGradient: "from-purple-900/40 to-black/60" },
   [EVENT_TYPES.CHALLENGE]: { name: "DEAD OR ALIVE", desc: "SUCCESS +3000 / FAIL -3000", color: "#ef4444", shadow: "rgba(239, 68, 68, 0.6)", bgGradient: "from-red-900/40 to-orange-900/40" },
   [EVENT_TYPES.REVOLUTION]: { name: "KING SLAYER", desc: "SUCCESS: TOP PLAYER -1000", color: "#3b82f6", shadow: "rgba(59, 130, 246, 0.5)", bgGradient: "from-blue-900/40 to-cyan-900/40" },
-  [EVENT_TYPES.TARGET]: { name: "BOUNTY HUNT", desc: "SUCCESS: STEAL 1000 PTS", color: "#10b981", shadow: "rgba(16, 185, 129, 0.5)", bgGradient: "from-emerald-900/40 to-green-900/40" },
+  [EVENT_TYPES.TARGET]: { name: "BOUNTY_HUNT", desc: "SUCCESS: STEAL 1000 PTS", color: "#10b981", shadow: "rgba(16, 185, 129, 0.5)", bgGradient: "from-emerald-900/40 to-green-900/40" },
   [EVENT_TYPES.BOMB]: { name: "BOMB PASS", desc: "NEXT PLAYER -1000", color: "#f97316", shadow: "rgba(249, 115, 22, 0.6)", bgGradient: "from-orange-700/40 to-red-900/40" },
   [EVENT_TYPES.PHOENIX]: { name: "PHOENIX RISE", desc: "COMEBACK CHANCE x3", color: "#e11d48", shadow: "rgba(225, 29, 72, 0.6)", bgGradient: "from-rose-900/40 to-pink-900/40" },
   [EVENT_TYPES.DUET]: { name: "DUET CHANCE", desc: "FAIL: YOU -1000", color: "#06b6d4", shadow: "rgba(6, 182, 212, 0.6)", bgGradient: "from-cyan-500/20 to-teal-500/20" },
@@ -75,11 +75,11 @@ const MissionDisplay = React.memo(({
       className="relative z-10 w-full max-w-5xl flex flex-col items-center gap-1 md:gap-6 text-center px-2"
     >
       {eventData && (
-        <motion.div initial={{ y: -20, opacity: 0, scale: 1.2 }} animate={{ y: 0, opacity: 1, scale: 1 }} className="w-full mb-1 flex flex-col items-center justify-center relative">
+        <motion.div initial={{ y: -20, opacity: 0, scale: 1.2 }} animate={{ y: 0, opacity: 1, scale: 1 }} className="w-full mb-1 md:mb-2 flex flex-col items-center justify-center relative">
           <div className={`absolute inset-0 blur-xl opacity-40 bg-gradient-to-r ${eventData.bgGradient} rounded-full`}></div>
           <motion.div animate={{ scale: [1, 1.05, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="relative z-10 px-4 py-1 border-y border-white/20 bg-black/60 backdrop-blur-md" style={{ boxShadow: `0 0 20px ${eventData.shadow}` }}>
             <p className="text-[8px] font-mono tracking-[0.3em] text-white font-bold">EVENT</p>
-            {/* スマホでイベント名が長すぎてはみ出るのを防ぐ */}
+            {/* PCでは特大サイズ(text-5xl)に戻し、スマホでは収まるサイズ(text-xl) */}
             <h2 className="text-xl md:text-5xl font-black italic tracking-tighter whitespace-nowrap" style={{ color: eventData.color, textShadow: `0 0 10px ${eventData.shadow}` }}>{eventData.name}</h2>
             <p className="text-[8px] md:text-sm font-bold text-white tracking-widest uppercase">{eventData.desc}</p>
           </motion.div>
@@ -87,26 +87,26 @@ const MissionDisplay = React.memo(({
       )}
 
       {partnerName && (
-        <div className="bg-cyan-900/30 border border-cyan-500/50 px-3 py-0.5 rounded-full flex items-center gap-2 animate-pulse mb-1">
-          <span className="text-cyan-400 text-[10px] md:text-xs font-bold">WITH:</span>
+        <div className="bg-cyan-900/30 border border-cyan-500/50 px-3 py-0.5 md:px-4 md:py-1 rounded-full flex items-center gap-2 animate-pulse mb-1">
+          <span className="text-cyan-400 text-[10px] md:text-xs font-bold">WITH PARTNER:</span>
           <span className="text-white text-xs md:text-base font-bold">{partnerName}</span>
         </div>
       )}
 
-      <div className="w-full flex flex-col items-center mt-1">
+      <div className="w-full flex flex-col items-center mt-1 md:mt-2">
         <div className="inline-block px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono tracking-[0.2em] text-[8px] md:text-xs mb-1 md:mb-4 font-bold">
-            MISSION
+            CURRENT MISSION
         </div>
-        {/* スマホでの文字サイズをさらに調整 */}
-        <h1 className="font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.4)] leading-tight w-full break-words text-[clamp(1.8rem,5vw,5rem)] px-1 md:px-0">
+        {/* PCではクランプの上限を大きく、余白を戻す */}
+        <h1 className="font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.4)] leading-tight w-full break-words text-[clamp(1.8rem,5vw,5rem)] md:text-[clamp(3rem,6vw,6rem)] px-1 md:px-2">
           {displayTitle}
         </h1>
       </div>
       
       <div className="w-full flex justify-center mt-2 md:mt-4">
         <div className="w-auto max-w-full bg-gradient-to-br from-red-900/40 to-black/40 border border-red-500/50 px-4 py-2 md:px-10 md:py-6 rounded-xl backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)] flex flex-col items-center gap-0.5">
-          <p className="text-red-300 font-mono tracking-[0.2em] text-[8px] md:text-xs uppercase opacity-90 font-bold whitespace-nowrap">Condition</p>
-          <p className="font-black text-white tracking-widest text-[clamp(1.5rem,4vw,3rem)]">{displayCriteria}</p>
+          <p className="text-red-300 font-mono tracking-[0.2em] text-[8px] md:text-xs uppercase opacity-90 font-bold whitespace-nowrap">Clear Condition</p>
+          <p className="font-black text-white tracking-widest text-[clamp(1.5rem,4vw,3rem)] md:text-[3rem]">{displayCriteria}</p>
         </div>
       </div>
     </motion.div>
@@ -158,20 +158,20 @@ const JackpotOverlay = ({ targetValue, onComplete }: { targetValue: number, onCo
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-xl px-4">
-      {/* スマホ最適化: gapを縮小、横幅を制限 */}
-      <div className="flex flex-col items-center gap-4 md:gap-8 animate-bounce-short w-full max-w-[90vw]">
-        {/* 文字サイズとtrackingをスマホ用に大幅縮小 */}
+      <div className="flex flex-col items-center gap-4 md:gap-8 animate-bounce-short w-full max-w-[90vw] md:max-w-none md:w-auto">
+        {/* PC: text-6xl, tracking-widest / スマホ: text-2xl */}
         <h2 className="text-2xl md:text-6xl font-black text-yellow-400 tracking-wider md:tracking-widest italic drop-shadow-[0_0_25px_rgba(250,204,21,0.8)] border-y-2 md:border-y-4 border-yellow-500 py-2 text-center whitespace-nowrap overflow-hidden text-ellipsis w-full">
-           JACKPOT CHANCE
+           🎰 JACKPOT 🎰
         </h2>
-        {/* コンテナのpaddingを削減 */}
+        
+        {/* PC: p-16, border-8, text-9xl (元の巨大サイズ) / スマホ: p-6, border-4, text-5xl */}
         <div className={`bg-gradient-to-b from-gray-800 to-black border-4 md:border-8 ${borderColor} rounded-3xl p-6 md:p-16 relative overflow-hidden transition-colors duration-100 w-full max-w-[320px] md:max-w-none md:min-w-[550px]`}>
           <div className="absolute top-0 left-0 w-full h-1/2 bg-white/10 skew-y-12 transform origin-top-left pointer-events-none"></div>
-          {/* 数字のサイズを調整 */}
           <p className={`font-mono font-black text-5xl md:text-9xl tracking-widest flex items-center justify-center transition-all duration-100 ${isFinished ? `${finishedColor} scale-125` : `${valueColor} blur-[2px]`}`}>
             {displayValue.toLocaleString()}
           </p>
         </div>
+        
         {isFinished && (
           <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className={`font-bold text-sm md:text-2xl tracking-[0.2em] md:tracking-[0.5em] px-4 py-2 md:px-8 rounded-full border text-center ${isNegative ? 'text-red-200 bg-red-900/50 border-red-500' : 'text-yellow-200 bg-yellow-900/50 border-yellow-500'}`}>
             {message}
@@ -622,7 +622,6 @@ export const GamePlayScreen = () => {
   ];
 
   return (
-    // ★重要: h-[100dvh]でスマホのアドレスバー込みの高さを確保
     <div className="w-full h-[100dvh] text-white overflow-hidden flex flex-col md:flex-row relative">
       <Toast messages={messages} onRemove={removeToast} />
       <AnimatePresence>
@@ -637,12 +636,13 @@ export const GamePlayScreen = () => {
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col h-full relative z-10 min-w-0">
-        {/* Header: 高さを h-14 (約56px) に縮小 */}
+        {/* Header: PC(md)ではh-20と大きなpaddingに戻す */}
         <div className="flex-none h-14 md:h-20 flex justify-between items-center px-3 md:px-8 border-b border-white/10 bg-black/20 backdrop-blur-md">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <div className="flex-none w-8 h-8 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center text-lg md:text-2xl shadow-[0_0_15px_cyan] border border-white/20">🎤</div>
             <div className="min-w-0 flex flex-col justify-center">
               <div className="flex items-center gap-2"><span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span><p className="text-[9px] md:text-[10px] text-cyan-400 font-mono tracking-widest font-bold">NOW</p></div>
+              {/* PCではtext-3xl等の大きなサイズに戻す */}
               <motion.p key={currentPlayer.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="text-white font-black leading-none truncate drop-shadow-md text-base md:text-[clamp(1.5rem,3vw,3rem)]">{currentPlayer.name}</motion.p>
             </div>
           </div>
@@ -658,8 +658,8 @@ export const GamePlayScreen = () => {
           </div>
         </div>
 
-        {/* Main Area: flex-1 で残りの高さを埋め、overflow-hiddenで内部スクロールの準備 */}
-        <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 relative w-full overflow-hidden">
+        {/* Main Area: PCではp-4に戻す */}
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 md:p-4 relative w-full overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
             <div className="w-[120%] aspect-square border border-cyan-500/20 rounded-full animate-[spin_20s_linear_infinite] max-h-[500px]"></div>
           </div>
@@ -667,9 +667,8 @@ export const GamePlayScreen = () => {
           <AnimatePresence mode="wait">
             {isSelectingMission && displayCandidates ? (
               // DESTINY CHOICE UI
-              // コンテナ全体をflex-colにし、中身が溢れたらスクロールさせる構造に変更
-              <motion.div key="selection-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-4xl flex flex-col items-center gap-2 h-full">
-                <div className="flex-none text-center pt-2">
+              <motion.div key="selection-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-4xl flex flex-col items-center gap-2 md:gap-4 h-full md:justify-center">
+                <div className="flex-none text-center pt-2 md:pt-0">
                   <h2 className="text-2xl md:text-5xl font-black text-yellow-400 italic tracking-tighter drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]">DESTINY CHOICE</h2>
                   {(isHost && currentPlayer.candidates?.length > 0 && currentPlayer.id !== userId) ? (
                     <p className="text-[10px] md:text-sm font-bold text-red-400 tracking-widest mt-1 bg-red-900/50 px-3 py-1 rounded-full border border-red-500 animate-pulse">ホスト代理操作中</p>
@@ -677,17 +676,14 @@ export const GamePlayScreen = () => {
                     <p className="text-[10px] md:text-sm font-bold text-white tracking-widest mt-1">ミッションを選択してください</p>
                   )}
                 </div>
-                {/* ★重要修正: 選択肢リストを flex-1 overflow-y-auto でラップ
-                   これにより、画面高さが足りない場合はこのdiv内でスクロールが発生し、
-                   親要素（画面全体）をはみ出さなくなる
-                */}
-                <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2">
-                  <div className="flex flex-col md:grid md:grid-cols-3 gap-2 w-full">
+                {/* PCではpaddingを広げ、GridGapも大きく */}
+                <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
+                  <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
                     {displayCandidates.map((cand: any, idx: number) => (
-                      <motion.button key={idx} whileHover={{ scale: 1.05, borderColor: '#facc15' }} whileTap={{ scale: 0.95 }} onClick={() => handleMissionSelected(cand)} className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-colors min-h-[100px] md:min-h-[160px] shrink-0">
-                        <div className="text-[9px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx + 1}</div>
+                      <motion.button key={idx} whileHover={{ scale: 1.05, borderColor: '#facc15' }} whileTap={{ scale: 0.95 }} onClick={() => handleMissionSelected(cand)} className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0">
+                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx + 1}</div>
                         <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cand.title}</h3>
-                        <p className="text-[10px] text-gray-400 font-mono mt-0.5">{cand.criteria}</p>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cand.criteria}</p>
                       </motion.button>
                     ))}
                   </div>
@@ -695,23 +691,22 @@ export const GamePlayScreen = () => {
               </motion.div>
             ) : isSelectingMyPartner ? (
                // DUET UI
-               <motion.div key="duet-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-lg bg-black/80 border border-cyan-500 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden">
-               <div className="flex-none p-4 pb-0 text-center">
+               <motion.div key="duet-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-lg bg-black/80 border border-cyan-500 rounded-2xl md:p-6 shadow-[0_0_50px_rgba(6,182,212,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden">
+               <div className="flex-none p-4 pb-0 md:p-0 text-center md:mb-4">
                  <h2 className="text-xl md:text-2xl font-black text-cyan-400 tracking-widest italic">DUET CHANCE</h2>
                  {(isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId) ? (
-                   <p className="text-red-400 text-[10px] font-mono mt-1">ホスト代理操作: パートナー指名</p>
+                   <p className="text-red-400 text-[10px] md:text-xs font-mono mt-1">ホスト代理操作: パートナー指名</p>
                  ) : (
-                   <p className="text-gray-300 text-[10px] font-mono mt-1">パートナーを指名してください！</p>
+                   <p className="text-gray-300 text-[10px] md:text-xs font-mono mt-1">パートナーを指名してください！</p>
                  )}
                </div>
-               {/* リスト部分をスクロール可能に */}
-               <div className="flex-1 overflow-y-auto custom-scrollbar p-4 min-h-0">
-                 <div className="grid grid-cols-2 gap-2">
+               <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-0 min-h-0">
+                 <div className="grid grid-cols-2 gap-2 md:gap-3">
                    {members.filter(m => m.id !== ((isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId) ? currentPlayer.id : userId)).map(m => (
-                   <button key={m.id} onClick={() => handlePlayerSelected(m.id, 'DUET')} className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-cyan-900/50 hover:border-cyan-500 transition-all flex flex-col items-center gap-1 group">
+                   <button key={m.id} onClick={() => handlePlayerSelected(m.id, 'DUET')} className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-cyan-900/50 hover:border-cyan-500 transition-all flex flex-col items-center gap-1 md:gap-2 group">
                    <div className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">{m.avatar}</div>
-                   <div className="font-bold text-white text-xs truncate w-full text-center">{m.name}</div>
-                   <div className="text-cyan-300 font-mono text-[10px]">{(m.score||0).toLocaleString()} pt</div>
+                   <div className="font-bold text-white text-xs md:text-sm truncate w-full text-center">{m.name}</div>
+                   <div className="text-cyan-300 font-mono text-[10px] md:text-xs">{(m.score||0).toLocaleString()} pt</div>
                    </button>
                    ))}
                  </div>
@@ -719,20 +714,19 @@ export const GamePlayScreen = () => {
                </motion.div>
             ) : isSelectingTarget ? (
               // TARGET UI
-              <motion.div key="target-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-lg bg-black/80 border border-emerald-500 rounded-2xl shadow-[0_0_50px_rgba(16,185,129,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden">
-                <div className="flex-none p-4 pb-0 text-center">
+              <motion.div key="target-ui" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }} className="relative z-20 w-full max-w-lg bg-black/80 border border-emerald-500 rounded-2xl md:p-6 shadow-[0_0_50px_rgba(16,185,129,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden">
+                <div className="flex-none p-4 pb-0 md:p-0 text-center md:mb-4">
                   <h2 className="text-xl md:text-2xl font-black text-emerald-400 tracking-widest italic">SELECT TARGET</h2>
-                  {isHost && !isMyTurn && <p className="text-red-400 font-bold text-[9px] animate-pulse">HOST OVERRIDE</p>}
-                  <p className="text-gray-300 text-[10px] font-mono mt-1">誰から1000ポイント奪いますか？</p>
+                  {isHost && !isMyTurn && <p className="text-red-400 font-bold text-[9px] md:text-xs animate-pulse">HOST OVERRIDE</p>}
+                  <p className="text-gray-300 text-[10px] md:text-xs font-mono mt-1">誰から1000ポイント奪いますか？</p>
                 </div>
-                {/* リスト部分をスクロール可能に */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 min-h-0">
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-0 min-h-0">
+                  <div className="grid grid-cols-2 gap-2 md:gap-3">
                     {members.filter(m => m.id !== currentPlayer.id).map(m => (
-                      <button key={m.id} onClick={() => handlePlayerSelected(m.id, 'TARGET')} className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-emerald-900/50 hover:border-emerald-500 transition-all flex flex-col items-center gap-1 group">
+                      <button key={m.id} onClick={() => handlePlayerSelected(m.id, 'TARGET')} className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-emerald-900/50 hover:border-emerald-500 transition-all flex flex-col items-center gap-1 md:gap-2 group">
                         <div className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">{m.avatar}</div>
-                        <div className="font-bold text-white text-xs truncate w-full text-center">{m.name}</div>
-                        <div className="text-emerald-300 font-mono text-[10px]">{(m.score||0).toLocaleString()} pt</div>
+                        <div className="font-bold text-white text-xs md:text-sm truncate w-full text-center">{m.name}</div>
+                        <div className="text-emerald-300 font-mono text-[10px] md:text-xs">{(m.score||0).toLocaleString()} pt</div>
                       </button>
                     ))}
                   </div>
@@ -752,7 +746,7 @@ export const GamePlayScreen = () => {
           </AnimatePresence>
         </div>
 
-        {/* Footer */}
+        {/* Footer: PCでは高さとパディングを大きく戻す */}
         <div className="flex-none px-2 pb-2 md:pb-12 pt-1 bg-gradient-to-t from-black/90 to-transparent z-20 w-full">
           <div className="flex gap-2 md:gap-6 w-full max-w-5xl mx-auto h-12 md:h-24">
             {!isInteractionLocked ? (
@@ -777,7 +771,7 @@ export const GamePlayScreen = () => {
           </div>
         </div>
 
-        {/* Mobile List: パディングを詰め、高さを節約 */}
+        {/* Mobile List: 変更なし（コンパクトのまま） */}
         <div className="md:hidden w-full bg-black/80 backdrop-blur-md border-t border-white/10 p-1.5 pb-4 flex flex-col gap-1 flex-none">
            <div className="flex justify-between items-center px-1">
             <span className="text-[8px] font-bold text-gray-500 tracking-widest">NEXT SINGERS</span>
@@ -808,7 +802,7 @@ export const GamePlayScreen = () => {
         </div>
       </div>
 
-      {/* Desktop List (Changes preserved for desktop only) */}
+      {/* Desktop List: 変更なし */}
       <div className="hidden md:flex w-[300px] lg:w-[360px] flex-none bg-black/60 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
           <div className="p-4 md:p-6 border-b border-white/10 bg-white/5 flex-none">
             <h3 className="text-xs md:text-sm font-bold text-white tracking-widest flex items-center gap-2"><span className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></span>RESERVATION LIST</h3>
