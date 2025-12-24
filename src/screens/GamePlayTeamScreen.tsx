@@ -20,8 +20,6 @@ const BASE_FAIL = 0;
 const MAX_LOGS = 80;
 const MAX_LOG_ENTRIES = 220;
 
-// 100刻み丸め
-const roundToStep = (v: number, step = 100) => Math.round(v / step) * step;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const capLogs = (logs: string[]) => logs.slice(Math.max(0, logs.length - MAX_LOGS));
 const capEntries = (entries: LogEntry[]) => entries.slice(Math.max(0, entries.length - MAX_LOG_ENTRIES));
@@ -136,26 +134,26 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'ATK',
     sigil: '⬢',
     passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
-    skill: 'SKILL: (3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
-    ult: 'ULT: (1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
+    skill: 'SKILL：(3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
+    ult: 'ULT：(1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
   },
   {
     id: 'showman',
     name: 'SHOWMAN',
     type: 'ATK',
     sigil: '◆',
-    passive: 'PASSIVE：成功時、常時 +500。失敗は基本0。',
-    skill: 'SKILL: (3回) ENCORE：成功時さらに+1200。失敗しても0。',
-    ult: 'ULT: (1回) SPOTLIGHT：成功なら敵チーム-2000 / 失敗なら自分-1000(例外)',
+    passive: 'PASSIVE：成功時、常時 +500。',
+    skill: 'SKILL：(3回) 成功時さらに+500（このターンのみ）',
+    ult: 'ULT：(1回) 成功なら敵チーム-2000（このターンのみ）',
   },
   {
     id: 'ironwall',
     name: 'IRON WALL',
     type: 'DEF',
     sigil: '▣',
-    passive: 'チームが受ける「チームへのマイナス効果」を30%軽減（歌唱の失敗0は対象外）。',
-    skill: 'SKILL: (3回) INTERCEPT：指定味方の次マイナスを0。代わりに自分が半分受ける。',
-    ult: 'ULT: (1回) BARRIER：次に自分の番が来るまで、チームへのマイナス効果を無効化。',
+    passive: 'チームが受ける「マイナス」を30%軽減（歌唱の失敗0は対象外）。',
+    skill: 'SKILL：(3回) 次の自チームのターン、受けるマイナス-50%',
+    ult: 'ULT：(1回) 次の自チームのターン、受けるマイナスをすべて0',
   },
   {
     id: 'coach',
@@ -163,8 +161,8 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'SUP',
     sigil: '✚',
     passive: '味方ターン開始時、チーム+150（歌唱結果に依存しない）。',
-    skill: 'SKILL: (3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
-    ult: 'ULT: (1回) MORALE：チーム+2500。弱いデバフ解除。',
+    skill: 'SKILL：(3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
+    ult: 'ULT：(1回) 指定した味方は「次のターン成功」になる',
   },
   {
     id: 'oracle',
@@ -172,8 +170,8 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'TEC',
     sigil: '⟁',
     passive: '自分のターンはお題3択。',
-    skill: 'SKILL: (3回) REROLL：自分or味方のお題を引き直し（3択維持）。',
-    ult: 'ULT: (1回) FATE SHIFT：味方チームの「次成功ボーナス +1500」（1回）',
+    skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
+    ult: 'ULT：(1回) 次のターンの相手チームのお題を全員分引き直す（3択：1番目は現在のお題）',
   },
   {
     id: 'mimic',
@@ -181,17 +179,17 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'TEC',
     sigil: '◈',
     passive: '直前の味方成功の獲得点30%を、自分成功時に上乗せ。',
-    skill: 'SKILL: (3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
-    ult: 'ULT: (1回) STEAL ROLE：敵のスキル相当効果を1回コピーして発動。',
+    skill: 'SKILL：(3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
+    ult: 'ULT：(1回) STEAL SKILL：敵ロールのSKILLを1回コピーして発動（必要ならターゲット選択あり）',
   },
   {
     id: 'hype',
     name: 'HYPE ENGINE',
     type: 'SUP',
     sigil: '✦',
-    passive: '自分ターン開始時、チーム+400（結果に依存しない）。',
-    skill: 'SKILL: (3回) 選んだ味方の「次の成功時 +2000」(1回)',
-    ult: 'ULT: (1回) 以降3ターン、味方全員の成功スコア +500',
+    passive: '自分のターン開始時、チーム+400（結果に依存しない）。',
+    skill: 'SKILL：(3回) 選んだ味方の「次の2ターン成功時 +500」(1回)',
+    ult: 'ULT：(1回) 以降3ターン味方全員の成功スコア +500',
   },
   {
     id: 'saboteur',
@@ -199,30 +197,36 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'TEC',
     sigil: '☒',
     passive: '自分成功で敵チーム-300。',
-    skill: 'SKILL: (3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -800（1回）',
-    ult: 'ULT: (1回) BLACKOUT：敵チームに「最悪の出来事」を強制（次の敵ターン -2000）',
+    skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
+    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をリセットしパッシブ、スキル、ウルトを無効化',
   },
   {
     id: 'underdog',
     name: 'UNDERDOG',
     type: 'DEF',
     sigil: '⬟',
-    passive: 'PASSIVE：負けている時、自分のターン開始時に +500。',
-    skill: 'SKILL: (3回) 現在の点差の20%を相手から奪う（最大2000）。',
-    ult: 'ULT: (1回) 劣勢時限定：チームに +2000。失敗時は -500（このターン）',
+    passive: '負けている時、自分のターン開始時に +500。',
+    skill: 'SKILL：(3回) 現在の点差の20%を相手から奪う（最大2000）。',
+    ult: 'ULT：(1回) 負けているとき：相手-2000まで追いつく／勝っているとき：チーム+2000',
   },
   {
     id: 'gambler',
     name: 'GAMBLER',
     type: 'TEC',
     sigil: '🎲',
-    passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（500刻み）。',
-    skill: 'SKILL: (3回) DOUBLE DOWN：成功×2 / 失敗-2000(例外)',
-    ult: 'ULT: (1回) 表なら +4000 ／ 裏なら -1000。',
+    passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（250刻み）。',
+    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル中はPASSIVEがマイナスでも0に止まる。',
+    ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
   },
 ];
 
 const roleDef = (id?: RoleId) => ROLE_DEFS.find((r) => r.id === id);
+
+const defaultRoleUses = (rid?: RoleId) => {
+  const skillUses = 3;
+  const ultUses = 1; // ORACLEもULTありに変更
+  return { skillUses, ultUses };
+};
 
 // =========================
 // Logs (structured)
@@ -311,16 +315,19 @@ const findFirstReadyIndex = (mems: any[]) => {
 };
 
 // =========================
-// Turn Start Auras (detailed)
+// Turn Start Auras
 // =========================
 type AuraPlan = { team: TeamId; delta: number; reason: string };
 
-const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }) => {
+const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }, teamBuffs: any) => {
   const plans: AuraPlan[] = [];
   if (!nextSinger?.team) return plans;
 
   const t: TeamId = nextSinger.team;
   const et: TeamId = t === 'A' ? 'B' : 'A';
+
+  const sealed = (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
+  if (sealed) return plans; // パッシブ無効化中
 
   // coach passive
   if (mems.some((m) => m.team === t && m.role?.id === 'coach')) plans.push({ team: t, delta: 150, reason: 'COACH PASSIVE (+150 at ally turn start)' });
@@ -654,12 +661,14 @@ type TargetModalState = null | {
   title: string;
   mode: 'ally' | 'enemy';
   action:
-    | 'ironwall_intercept'
     | 'coach_timeout'
+    | 'coach_ult'
     | 'saboteur_sabotage'
     | 'oracle_reroll'
+    | 'hype_boost'
     | 'mimic_steal'
-    | 'hype_boost';
+    | 'mimic_stolen_ally'
+    | 'mimic_stolen_enemy';
 };
 
 const TargetModal = ({
@@ -821,8 +830,7 @@ const MissionDisplay = React.memo(({ title, criteria, stateText }: any) => {
   };
 
   return (
-    
-<motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
+    <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
       <div className="w-full flex flex-col items-center mt-1 md:mt-2 px-2 overflow-visible">
         <div className="inline-block px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono tracking-[0.2em] text-[8px] md:text-xs mb-1 md:mb-2 font-bold">
           CURRENT THEME
@@ -869,7 +877,9 @@ export const GamePlayTeamScreen = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
-  const [turnAbilityUsed, setTurnAbilityUsed] = useState(false);
+  // ★同一ターンにSKILL&ULT両方OK（SKILL連続不可 / ULT連続不可）
+  const [turnSkillUsed, setTurnSkillUsed] = useState(false);
+  const [turnUltUsed, setTurnUltUsed] = useState(false);
 
   // UI
   const [showFinishModal, setShowFinishModal] = useState(false);
@@ -892,6 +902,9 @@ export const GamePlayTeamScreen = () => {
   // Overlay (skill/ult)
   const [abilityFx, setAbilityFx] = useState<AbilityFx>(null);
   const lastFxTimestampRef = useRef<number>(0);
+
+  // Mimic steal flow (client-side)
+  const [mimicStolenRoleId, setMimicStolenRoleId] = useState<RoleId | null>(null);
 
   const clearAbilityFx = useCallback(() => setAbilityFx(null), []);
   const clearActionLog = useCallback(() => setActiveActionLog(null), []);
@@ -929,7 +942,11 @@ export const GamePlayTeamScreen = () => {
 
       setLogs(data.logs || []);
       setLogEntries(Array.isArray(data.logEntries) ? data.logEntries : []);
-      setTurnAbilityUsed(!!data.turnAbilityUsed);
+
+      // backward compat: old boolean exists
+      const compat = !!data.turnAbilityUsed;
+      setTurnSkillUsed(data.turnSkillUsed ?? compat);
+      setTurnUltUsed(data.turnUltUsed ?? false);
 
       if (data.lastLog?.timestamp && data.lastLog.timestamp !== lastLogTimestampRef.current) {
         lastLogTimestampRef.current = data.lastLog.timestamp;
@@ -1038,7 +1055,14 @@ export const GamePlayTeamScreen = () => {
     const idxMember = sorted[roomData.currentTurnIndex ?? 0];
     const currentIdxBad = idxMember && !isReadyForTurn(idxMember);
 
-    const needsInit = !roomData.teamBuffs || roomData.turnAbilityUsed === undefined || !roomData.teamScores || hasMissingTurnOrder || hasReadyMissingChallenge || currentIdxBad;
+    const needsInit =
+      !roomData.teamBuffs ||
+      roomData.turnSkillUsed === undefined ||
+      roomData.turnUltUsed === undefined ||
+      !roomData.teamScores ||
+      hasMissingTurnOrder ||
+      hasReadyMissingChallenge ||
+      currentIdxBad;
 
     if (!needsInit) return;
     if (initLockRef.current) return;
@@ -1062,25 +1086,34 @@ export const GamePlayTeamScreen = () => {
 
         let mems = (data.members || []).slice().sort(sortByTurn);
 
-        mems = mems.map((m: any) => ({
-          ...m,
-          score: m.score ?? 0,
-          combo: m.combo ?? 0,
-          buffs: m.buffs ?? {},
-          debuffs: m.debuffs ?? {},
-          candidates: Array.isArray(m.candidates) ? m.candidates : null,
-          challenge: m.challenge ?? null,
-          role: m.role
+        let changed = false;
+        mems = mems.map((m: any) => {
+          const rid: RoleId | undefined = m.role?.id;
+          const defUses = defaultRoleUses(rid);
+          const prevSkill = m.role?.skillUses;
+          const prevUlt = m.role?.ultUses;
+
+          const role = m.role
             ? {
                 ...m.role,
-                skillUses: m.role.skillUses ?? 3,
-                ultUses: m.role.ultUses ?? 1,
+                skillUses: prevSkill ?? defUses.skillUses,
+                ultUses: prevUlt ?? defUses.ultUses,
               }
-            : null,
-        }));
+            : null;
+
+          return {
+            ...m,
+            score: m.score ?? 0,
+            combo: m.combo ?? 0,
+            buffs: m.buffs ?? {},
+            debuffs: m.debuffs ?? {},
+            candidates: Array.isArray(m.candidates) ? m.candidates : null,
+            challenge: m.challenge ?? null,
+            role,
+          };
+        });
 
         let maxOrder = mems.reduce((mx: number, m: any) => (typeof m.turnOrder === 'number' ? Math.max(mx, m.turnOrder) : mx), -1);
-        let changed = false;
         mems = mems.map((m: any) => {
           if (m.turnOrder === undefined || m.turnOrder === null) {
             maxOrder += 1;
@@ -1135,7 +1168,8 @@ export const GamePlayTeamScreen = () => {
           deck,
           teamScores: ts,
           teamBuffs: tb,
-          turnAbilityUsed: data.turnAbilityUsed ?? false,
+          turnSkillUsed: data.turnSkillUsed ?? !!data.turnAbilityUsed ?? false,
+          turnUltUsed: data.turnUltUsed ?? false,
           logEntries: Array.isArray(data.logEntries) ? data.logEntries : [],
         };
 
@@ -1168,8 +1202,27 @@ export const GamePlayTeamScreen = () => {
   const canOperateAbility =
     currentSinger?.id === userId || (isHost && (isGuestTurn || (currentSinger && offlineUsers.has(currentSinger.id))));
 
-  const canUseSkill = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.skillUses ?? 0) > 0;
-  const canUseUlt = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.ultUses ?? 0) > 0;
+  const sealedThisTurnClient = useMemo(() => {
+    const t = currentSinger?.team as TeamId | undefined;
+    if (!t) return false;
+    return (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
+  }, [teamBuffs, currentSinger?.team]);
+
+  const canUseSkill =
+    !!currentSinger &&
+    !!currentSinger.role &&
+    canOperateAbility &&
+    !turnSkillUsed &&
+    (currentSinger.role.skillUses ?? 0) > 0 &&
+    !sealedThisTurnClient;
+
+  const canUseUlt =
+    !!currentSinger &&
+    !!currentSinger.role &&
+    canOperateAbility &&
+    !turnUltUsed &&
+    (currentSinger.role.ultUses ?? 0) > 0 &&
+    !sealedThisTurnClient;
 
   // candidates selection UI
   const isHostOverrideSelecting = isHost && currentSinger?.candidates?.length > 0 && currentSinger?.id !== userId;
@@ -1184,38 +1237,39 @@ export const GamePlayTeamScreen = () => {
   // ===== Effects chips =====
   const activeEffects = useMemo(() => {
     const chips: string[] = [];
-    const serial = turnSerial ?? 0;
 
     const addTeam = (t: TeamId) => {
       const tb = teamBuffs?.[t] || {};
       if ((tb.nextSuccessBonus ?? 0) > 0) chips.push(`TEAM ${t} NEXT +${tb.nextSuccessBonus}`);
-      if ((tb.roarRemaining ?? 0) > 0) chips.push(`TEAM ${t} ROAR x${tb.roarRemaining}`);
-      if ((tb.barrierUntil ?? -1) > serial) chips.push(`TEAM ${t} BARRIER`);
       if ((tb.hypeUltTurns ?? 0) > 0) chips.push(`TEAM ${t} HYPE +500 (${tb.hypeUltTurns}T)`);
-      if ((tb.blackoutTurns ?? 0) > 0) chips.push(`TEAM ${t} BLACKOUT (NEXT)`);
+      if ((tb.sealedTurns ?? 0) > 0) chips.push(`TEAM ${t} SEALED (THIS TURN)`);
+      if ((tb.negHalfTurns ?? 0) > 0) chips.push(`TEAM ${t} NEG -50% (NEXT TEAM TURN)`);
+      if ((tb.negZeroTurns ?? 0) > 0) chips.push(`TEAM ${t} NEG 0 (NEXT TEAM TURN)`);
     };
 
     addTeam('A');
     addTeam('B');
 
     if (currentSinger?.role?.id === 'maestro' && (currentSinger.combo ?? 0) > 0) chips.push(`COMBO x${currentSinger.combo}`);
-    if (turnAbilityUsed) chips.push('ABILITY USED');
+
+    if (turnSkillUsed) chips.push('SKILL USED');
+    if (turnUltUsed) chips.push('ULT USED');
 
     const b = currentSinger?.buffs || {};
     const d = currentSinger?.debuffs || {};
     if (b.maestroSkill) chips.push('MAESTRO SKILL ARMED');
-    if (b.encore) chips.push('ENCORE');
+    if (b.encore) chips.push('SHOWMAN SKILL ARMED');
     if (b.doubleDown) chips.push('DOUBLE DOWN');
     if (b.gamblerUlt) chips.push('GAMBLER ULT ARMED');
-    if (b.spotlight) chips.push('SPOTLIGHT');
+    if (b.spotlight) chips.push('SHOWMAN ULT ARMED');
     if (b.safe) chips.push('SAFE');
-    if (b.clutchDebt) chips.push('UNDERDOG ULT (FAIL -500)');
     if (b.echo) chips.push('ECHO');
-    if (b.hypeBoost) chips.push('HYPE +2000 (NEXT SUCCESS)');
+    if (b.hypeBoost?.turns) chips.push(`HYPE +500 (${b.hypeBoost.turns}T)`);
+    if (b.forcedSuccess) chips.push('FORCED SUCCESS');
     if (d.sabotaged) chips.push('SABOTAGED');
 
     return chips;
-  }, [teamBuffs, turnSerial, currentSinger, turnAbilityUsed]);
+  }, [teamBuffs, currentSinger, turnSkillUsed, turnUltUsed]);
 
   // ===== Targets for ability modal =====
   const availableTargets = useMemo(() => {
@@ -1460,7 +1514,8 @@ export const GamePlayTeamScreen = () => {
         if (used.has(def.id)) throw new Error('RoleAlreadyUsed');
 
         const updated = { ...(mems[idx] || {}) };
-        updated.role = { id: def.id, name: def.name, skillUses: 3, ultUses: 1 };
+        const uses = defaultRoleUses(def.id);
+        updated.role = { id: def.id, name: def.name, skillUses: uses.skillUses, ultUses: uses.ultUses };
         updated.score = updated.score ?? 0;
         updated.combo = updated.combo ?? 0;
         updated.buffs = updated.buffs ?? {};
@@ -1477,7 +1532,7 @@ export const GamePlayTeamScreen = () => {
           actorId: updated.id,
           team: updated.team,
           title: 'MIDJOIN ROLE',
-          lines: [`ROLE: ${def.name}`, `SKILL USES: 3`, `ULT USES: 1`],
+          lines: [`ROLE: ${def.name}`, `SKILL USES: ${uses.skillUses}`, `ULT USES: ${uses.ultUses}`],
         };
 
         tx.update(ref, {
@@ -1506,11 +1561,11 @@ export const GamePlayTeamScreen = () => {
 
     const rid: RoleId = currentSinger.role.id;
 
-    if (rid === 'ironwall') return setTargetModal({ title: 'INTERCEPT: 味方を選択', mode: 'ally', action: 'ironwall_intercept' });
-    if (rid === 'coach') return setTargetModal({ title: 'TIMEOUT: 味方を選択', mode: 'ally', action: 'coach_timeout' });
-    if (rid === 'saboteur') return setTargetModal({ title: 'SABOTAGE: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' });
-    if (rid === 'oracle') return setTargetModal({ title: 'REROLL: 味方を選択', mode: 'ally', action: 'oracle_reroll' });
-    if (rid === 'hype') return setTargetModal({ title: 'HYPE BOOST: 味方を選択', mode: 'ally', action: 'hype_boost' });
+    // target skills
+    if (rid === 'coach') return setTargetModal({ title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' });
+    if (rid === 'saboteur') return setTargetModal({ title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' });
+    if (rid === 'oracle') return setTargetModal({ title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' });
+    if (rid === 'hype') return setTargetModal({ title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' });
 
     const def = roleDef(rid);
     setConfirmState({
@@ -1538,7 +1593,8 @@ export const GamePlayTeamScreen = () => {
 
     const rid: RoleId = currentSinger.role.id;
 
-    if (rid === 'mimic') return setTargetModal({ title: 'STEAL ROLE: 敵ロールを選択', mode: 'enemy', action: 'mimic_steal' });
+    if (rid === 'mimic') return setTargetModal({ title: 'MIMIC ULT: 敵ロールを選択', mode: 'enemy', action: 'mimic_steal' });
+    if (rid === 'coach') return setTargetModal({ title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' });
 
     const def = roleDef(rid);
     setConfirmState({
@@ -1566,30 +1622,35 @@ export const GamePlayTeamScreen = () => {
     const target = sortedMembers.find((m) => m.id === targetId);
     if (!target) return;
 
-    const kind = action === 'mimic_steal' ? 'ult' : 'skill';
+    const isMimicSecond = action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy';
+    const effectiveRoleName = isMimicSecond ? `MIMIC (stolen ${mimicStolenRoleId || '—'})` : roleDef(rid)?.name || 'ROLE';
+
+    const kind = action === 'coach_ult' || action.startsWith('mimic_') ? 'ult' : 'skill';
     const title = kind === 'ult' ? 'CONFIRM ULT TARGET' : 'CONFIRM SKILL TARGET';
 
-    const def = roleDef(rid);
-
     const actionText =
-      action === 'ironwall_intercept'
-        ? 'INTERCEPT'
-        : action === 'coach_timeout'
+      action === 'coach_timeout'
         ? 'TIMEOUT'
+        : action === 'coach_ult'
+        ? 'FORCE SUCCESS'
         : action === 'saboteur_sabotage'
         ? 'SABOTAGE'
         : action === 'oracle_reroll'
         ? 'REROLL'
         : action === 'hype_boost'
         ? 'HYPE BOOST'
-        : 'STEAL ROLE';
+        : action === 'mimic_steal'
+        ? 'STEAL SKILL'
+        : action === 'mimic_stolen_ally'
+        ? 'STOLEN SKILL'
+        : 'STOLEN SKILL';
 
     setConfirmState({
       title,
       body: (
         <div className="space-y-3">
           <div className="text-white/80">
-            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black">{actionText}</span> を
+            <span className="font-black">{effectiveRoleName}</span> の <span className="font-black">{actionText}</span> を
             <span className="font-black text-cyan-200"> {target.name}</span> に使いますか？
           </div>
           <div className="p-3 rounded-xl border border-white/10 bg-black/30">
@@ -1608,13 +1669,41 @@ export const GamePlayTeamScreen = () => {
       confirmText: 'ACTIVATE',
       onConfirm: async () => {
         setConfirmState(null);
+
+        // mimic first step: choose enemy role -> then decide if target selection needed
         if (action === 'mimic_steal') {
           const stolen: RoleId | undefined = target?.role?.id;
           if (!stolen) return;
+
+          setMimicStolenRoleId(stolen);
+
+          // need 2nd selection?
+          if (stolen === 'coach' || stolen === 'oracle' || stolen === 'hype') {
+            setTargetModal({ title: `MIMIC: STOLEN ${stolen.toUpperCase()} SKILL / 味方を選択`, mode: 'ally', action: 'mimic_stolen_ally' });
+            return;
+          }
+          if (stolen === 'saboteur') {
+            setTargetModal({ title: `MIMIC: STOLEN SABOTEUR SKILL / 敵を選択`, mode: 'enemy', action: 'mimic_stolen_enemy' });
+            return;
+          }
+
+          // no more selection -> activate directly
           await applyAbility({ kind: 'ult', stolenRoleId: stolen });
+          setMimicStolenRoleId(null);
           return;
         }
-        await applyAbility({ kind, targetId });
+
+        // mimic second step
+        if (action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy') {
+          const stolen = mimicStolenRoleId;
+          if (!stolen) return;
+          await applyAbility({ kind: 'ult', stolenRoleId: stolen, targetId });
+          setMimicStolenRoleId(null);
+          return;
+        }
+
+        // normal
+        await applyAbility({ kind: kind as any, targetId });
       },
     });
   };
@@ -1634,16 +1723,28 @@ export const GamePlayTeamScreen = () => {
 
         const data: any = snap.data();
         const mems = (data.members || [])
-          .map((m: any) => ({
-            ...m,
-            score: m.score ?? 0,
-            combo: m.combo ?? 0,
-            buffs: m.buffs ?? {},
-            debuffs: m.debuffs ?? {},
-            role: m.role ? { ...m.role, skillUses: m.role.skillUses ?? 3, ultUses: m.role.ultUses ?? 1 } : null,
-            candidates: Array.isArray(m.candidates) ? m.candidates : null,
-            challenge: m.challenge ?? null,
-          }))
+          .map((m: any) => {
+            const rid: RoleId | undefined = m.role?.id;
+            const uses = defaultRoleUses(rid);
+            const role = m.role
+              ? {
+                  ...m.role,
+                  skillUses: m.role.skillUses ?? uses.skillUses,
+                  ultUses: m.role.ultUses ?? uses.ultUses,
+                }
+              : null;
+
+            return {
+              ...m,
+              score: m.score ?? 0,
+              combo: m.combo ?? 0,
+              buffs: m.buffs ?? {},
+              debuffs: m.debuffs ?? {},
+              role,
+              candidates: Array.isArray(m.candidates) ? m.candidates : null,
+              challenge: m.challenge ?? null,
+            };
+          })
           .slice()
           .sort(sortByTurn);
 
@@ -1654,16 +1755,42 @@ export const GamePlayTeamScreen = () => {
         const singer = mems[idx];
         if (!singer) return;
 
-        if (data.turnAbilityUsed) return;
-
         const canOperate =
           singer.id === userId || (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
         if (!canOperate) return;
 
+        const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
+        const t: TeamId = singer.team;
+        const et: TeamId = t === 'A' ? 'B' : 'A';
+
+        // sealed: skill/ult disabled
+        if ((teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0) return;
+
+        // skill/ult turn lock
+        const compat = !!data.turnAbilityUsed;
+        const turnSkillUsedTx = data.turnSkillUsed ?? compat;
+        const turnUltUsedTx = data.turnUltUsed ?? false;
+
+        const kind = opts.kind;
+        if (kind === 'skill' && turnSkillUsedTx) return;
+        if (kind === 'ult' && turnUltUsedTx) return;
+
         const r: RoleId | undefined = singer.role?.id;
         if (!r) return;
 
-        const kind = opts.kind;
+        // theme deck helpers
+        const pool = normalizeThemePool(data.themePool);
+        let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
+        let deckChanged = false;
+
+        // helper: reroll 3-choice with first fixed
+        const rerollThreeChoicesKeepFirst = (target: any, deckIn: ThemeCard[], poolIn: ThemeCard[]) => {
+          const current = target.challenge ?? { title: 'FREE THEME', criteria: '—' };
+          const d2 = drawFromDeck<ThemeCard>(deckIn, poolIn, 2);
+          const extra = d2.choices || [];
+          const choices: ThemeCard[] = [current, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
+          return { nextDeck: d2.nextDeck, choices, current };
+        };
 
         // score helpers (detailed)
         const scoreChanges: ScoreChange[] = [];
@@ -1672,12 +1799,17 @@ export const GamePlayTeamScreen = () => {
         if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
 
         const recordTeam = (team: TeamId, delta: number, reason: string) => {
+          if (!delta) return;
           const from = teamScoresTx[team] ?? 0;
           const to = from + delta;
           teamScoresTx = { ...teamScoresTx, [team]: to };
           scoreChanges.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta, reason });
         };
 
+        const pushLines: string[] = [];
+        const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
+
+        // consume uses
         if (kind === 'skill') {
           if ((singer.role.skillUses ?? 0) <= 0) return;
           singer.role.skillUses -= 1;
@@ -1686,27 +1818,21 @@ export const GamePlayTeamScreen = () => {
           singer.role.ultUses -= 1;
         }
 
-        const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
-        const t: TeamId = singer.team;
-        const et: TeamId = t === 'A' ? 'B' : 'A';
-
-        const pushLines: string[] = [];
-        const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
-
-        // ---- SKILL ----
-        if (kind === 'skill') {
+        // ---- NORMAL SKILL/ULT ----
+        if (kind === 'skill' && r !== 'mimic') {
           if (r === 'maestro') {
             singer.buffs.maestroSkill = true;
             pushLines.push(`SKILL MAESTRO: armed (success COMBO+2 / fail -500)`);
           } else if (r === 'showman') {
             singer.buffs.encore = true;
-            pushLines.push(`SKILL SHOWMAN: ENCORE armed (+1200 on success)`);
+            pushLines.push(`SKILL SHOWMAN: armed (+500 on success)`);
           } else if (r === 'gambler') {
             singer.buffs.doubleDown = true;
-            pushLines.push(`SKILL GAMBLER: DOUBLE DOWN armed (success x2 / fail -2000)`);
+            singer.buffs.gamblerSkillClampPassive = true;
+            pushLines.push(`SKILL GAMBLER: DOUBLE DOWN armed (success x2 / fail -2000) + passive clamp`);
           } else if (r === 'underdog') {
             const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
-            const steal = clamp(roundToStep(diff * 0.2, 100), 0, 2000);
+            const steal = clamp(Math.round(diff * 0.2), 0, 2000);
             recordTeam(t, +steal, `UNDERDOG SKILL (steal 20% up to 2000)`);
             recordTeam(et, -steal, `UNDERDOG SKILL (stolen by TEAM ${t})`);
             pushLines.push(`SKILL UNDERDOG: steal ${steal} from TEAM ${et}`);
@@ -1715,18 +1841,14 @@ export const GamePlayTeamScreen = () => {
             if (!targetId) return;
             const target = mems.find((m: any) => m.id === targetId);
             if (!target || target.team !== t) return;
-            target.buffs.hypeBoost = { value: 2000, by: singer.id };
-            pushLines.push(`SKILL HYPE: ${target.name} next success +2000`);
+            target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id };
+            pushLines.push(`SKILL HYPE: ${target.name} next 2 turns (success +500)`);
           } else if (r === 'mimic') {
             singer.buffs.echo = true;
             pushLines.push(`SKILL MIMIC: ECHO armed (copy 50% last turn delta)`);
           } else if (r === 'ironwall') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.intercept = { by: singer.id };
-            pushLines.push(`SKILL IRONWALL: INTERCEPT -> ${target.name}`);
+            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negHalfTurns: 1, negZeroTurns: 0 };
+            pushLines.push(`SKILL IRONWALL: next TEAM ${t} turn negative -50%`);
           } else if (r === 'coach') {
             const targetId = opts.targetId;
             if (!targetId) return;
@@ -1739,8 +1861,8 @@ export const GamePlayTeamScreen = () => {
             if (!targetId) return;
             const target = mems.find((m: any) => m.id === targetId);
             if (!target || target.team !== et) return;
-            target.debuffs.sabotaged = { by: singer.id };
-            pushLines.push(`SKILL SABOTEUR: sabotaged -> ${target.name} (success +0 / fail -800)`);
+            target.debuffs.sabotaged = { by: singer.id, fail: -1000 };
+            pushLines.push(`SKILL SABOTEUR: sabotaged -> ${target.name} (success +0 / fail -1000)`);
           } else if (r === 'oracle') {
             const targetId = opts.targetId;
             if (!targetId) return;
@@ -1750,31 +1872,19 @@ export const GamePlayTeamScreen = () => {
             const target = { ...mems[targetIdx] };
             if (target.team !== t) return;
 
-            const pool = normalizeThemePool(data.themePool);
-            let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
+            const res = rerollThreeChoicesKeepFirst(target, deck, pool);
+            deck = res.nextDeck;
+            deckChanged = true;
 
-            const keepThree = target.role?.id === 'oracle' || (Array.isArray(target.candidates) && target.candidates.length > 0);
-            const d = drawFromDeck<ThemeCard>(deck, pool, keepThree ? 3 : 1);
-            deck = d.nextDeck;
-
-            if (keepThree) {
-              const choices = d.choices || [];
-              target.candidates = choices;
-              target.challenge = choices[0] ?? { title: 'FREE THEME', criteria: '—' };
-            } else {
-              target.candidates = null;
-              target.challenge = d.picked ?? { title: 'FREE THEME', criteria: '—' };
-            }
+            target.candidates = res.choices;
+            target.challenge = res.current;
 
             mems[targetIdx] = target;
-
-            tx.update(ref, { deck });
-            pushLines.push(`SKILL ORACLE: REROLL -> ${target.name}`);
+            pushLines.push(`SKILL ORACLE: REROLL -> ${target.name} (opt1=current)`);
           }
         }
 
-        // ---- ULT ----
-        if (kind === 'ult') {
+        if (kind === 'ult' && r !== 'mimic') {
           if (r === 'maestro') {
             const combo = singer.combo ?? 0;
             const gain = combo * 800;
@@ -1784,40 +1894,136 @@ export const GamePlayTeamScreen = () => {
             pushLines.push(`ULT MAESTRO: FINALE team +${gain}, next success +500`);
           } else if (r === 'showman') {
             singer.buffs.spotlight = true;
-            pushLines.push(`ULT SHOWMAN: SPOTLIGHT armed (success enemy -2000 / fail self -1000)`);
+            pushLines.push(`ULT SHOWMAN: armed (success enemy -2000)`);
           } else if (r === 'ironwall') {
-            const serial = data.turnSerial ?? 0;
-            const readyCount = mems.filter((m: any) => isReadyForTurn(m)).length || mems.length || 6;
-            const expire = serial + readyCount;
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), barrierUntil: expire, barrierOwner: singer.id };
-            pushLines.push(`ULT IRONWALL: BARRIER active`);
+            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negZeroTurns: 1, negHalfTurns: 0 };
+            pushLines.push(`ULT IRONWALL: next TEAM ${t} turn negative -> 0`);
           } else if (r === 'coach') {
-            recordTeam(t, 2500, `COACH ULT (MORALE +2500)`);
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), blackoutTurns: 0 };
-            pushLines.push(`ULT COACH: MORALE team +2500 (cleanse light debuffs)`);
-          } else if (r === 'oracle') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 1500 };
-            pushLines.push(`ULT ORACLE: FATE SHIFT next success +1500`);
-          } else if (r === 'mimic') {
-            const stolen = opts.stolenRoleId;
-            if (!stolen) return;
-            singer.buffs.stolenSkill = stolen;
-            pushLines.push(`ULT MIMIC: STEAL ROLE -> ${stolen}`);
+            const targetId = opts.targetId;
+            if (!targetId) return;
+            const target = mems.find((m: any) => m.id === targetId);
+            if (!target || target.team !== t) return;
+            target.buffs.forcedSuccess = { by: singer.id };
+            pushLines.push(`ULT COACH: ${target.name} next turn FORCED SUCCESS`);
           } else if (r === 'hype') {
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
             pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
           } else if (r === 'saboteur') {
-            teamBuffsTx[et] = { ...(teamBuffsTx[et] || {}), blackoutTurns: 1 };
-            pushLines.push(`ULT SABOTEUR: BLACKOUT -> TEAM ${et} next turn -2000`);
+            const keepLast = teamBuffsTx?.[et]?.lastTeamDelta ?? 0;
+            teamBuffsTx[et] = { sealedTurns: 1, lastTeamDelta: keepLast };
+            for (let i = 0; i < mems.length; i++) {
+              if (mems[i]?.team === et) {
+                mems[i] = { ...mems[i], buffs: {}, debuffs: {} };
+              }
+            }
+            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects reset + sealed (passive/skill/ult disabled next team turn)`);
           } else if (r === 'underdog') {
-            const losing = (teamScoresTx[t] ?? 0) < (teamScoresTx[et] ?? 0);
-            if (!losing) return;
-            recordTeam(t, 2000, `UNDERDOG ULT (+2000 when losing)`);
-            singer.buffs.clutchDebt = true;
-            pushLines.push(`ULT UNDERDOG: team +2000 (if fail -500 this turn)`);
+            const my = teamScoresTx[t] ?? 0;
+            const opp = teamScoresTx[et] ?? 0;
+
+            if (my < opp) {
+              const targetScore = opp - 2000;
+              const delta = Math.max(0, targetScore - my);
+              if (delta > 0) recordTeam(t, delta, 'UNDERDOG ULT (catch up to opp-2000)');
+              pushLines.push(`ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`);
+            } else {
+              recordTeam(t, 2000, 'UNDERDOG ULT (winning: +2000)');
+              pushLines.push(`ULT UNDERDOG: winning => team +2000`);
+            }
           } else if (r === 'gambler') {
             singer.buffs.gamblerUlt = true;
-            pushLines.push(`ULT GAMBLER: coinflip armed (+4000 / -1000)`);
+            pushLines.push(`ULT GAMBLER: coinflip armed (+5000 / -1000)`);
+          } else if (r === 'oracle') {
+            // ★追加：相手チーム全員のお題を3択に引き直し（1番目は現在のお題）
+            const affected: string[] = [];
+            for (let i = 0; i < mems.length; i++) {
+              const m = mems[i];
+              if (!isReadyForTurn(m)) continue;
+              if (m.team !== et) continue;
+
+              const target = { ...m };
+              const res = rerollThreeChoicesKeepFirst(target, deck, pool);
+              deck = res.nextDeck;
+              deckChanged = true;
+
+              target.candidates = res.choices;
+              target.challenge = res.current; // 1番目は現在のお題として固定
+
+              mems[i] = target;
+              affected.push(target.name);
+            }
+
+            pushLines.push(`ULT ORACLE: reroll TEAM ${et} themes for ALL members (opt1=current)`);
+            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
+          }
+        }
+
+        
+// ---- MIMIC ULT (STEAL SKILL) ----
+        if (kind === 'ult' && r === 'mimic') {
+          const stolen = opts.stolenRoleId;
+          if (!stolen) return;
+
+          // Apply stolen SKILL effect once
+          if (stolen === 'coach') {
+            const targetId = opts.targetId;
+            if (!targetId) return;
+            const target = mems.find((m: any) => m.id === targetId);
+            if (!target || target.team !== t) return;
+            target.buffs.safe = true;
+            pushLines.push(`MIMIC ULT: stole COACH SKILL -> SAFE to ${target.name}`);
+          } else if (stolen === 'oracle') {
+            const targetId = opts.targetId;
+            if (!targetId) return;
+            const targetIdx = mems.findIndex((m: any) => m.id === targetId);
+            if (targetIdx === -1) return;
+            const target = { ...mems[targetIdx] };
+            if (target.team !== t) return;
+
+            const res = rerollThreeChoicesKeepFirst(target, deck, pool);
+            deck = res.nextDeck;
+            deckChanged = true;
+
+            target.candidates = res.choices;
+            target.challenge = res.current;
+
+            mems[targetIdx] = target;
+            pushLines.push(`MIMIC ULT: stole ORACLE SKILL -> REROLL for ${target.name} (opt1=current)`);
+          } else if (stolen === 'hype') {
+            const targetId = opts.targetId;
+            if (!targetId) return;
+            const target = mems.find((m: any) => m.id === targetId);
+            if (!target || target.team !== t) return;
+            target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id, stolen: true };
+            pushLines.push(`MIMIC ULT: stole HYPE SKILL -> ${target.name} next 2 turns (success +500)`);
+          } else if (stolen === 'saboteur') {
+            const targetId = opts.targetId;
+            if (!targetId) return;
+            const target = mems.find((m: any) => m.id === targetId);
+            if (!target || target.team !== et) return;
+            target.debuffs.sabotaged = { by: singer.id, fail: -1000, stolen: true };
+            pushLines.push(`MIMIC ULT: stole SABOTEUR SKILL -> sabotage ${target.name} (success +0 / fail -1000)`);
+          } else if (stolen === 'ironwall') {
+            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negHalfTurns: 1, negZeroTurns: 0 };
+            pushLines.push(`MIMIC ULT: stole IRONWALL SKILL -> next TEAM ${t} turn negative -50%`);
+          } else if (stolen === 'showman') {
+            singer.buffs.encore = true;
+            pushLines.push(`MIMIC ULT: stole SHOWMAN SKILL -> +500 on success (this turn)`);
+          } else if (stolen === 'maestro') {
+            singer.buffs.maestroSkill = true;
+            pushLines.push(`MIMIC ULT: stole MAESTRO SKILL -> (success COMBO+2 / fail -500)`);
+          } else if (stolen === 'gambler') {
+            singer.buffs.doubleDown = true;
+            singer.buffs.gamblerSkillClampPassive = true;
+            pushLines.push(`MIMIC ULT: stole GAMBLER SKILL -> DOUBLE DOWN armed + passive clamp`);
+          } else if (stolen === 'underdog') {
+            const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
+            const steal = clamp(Math.round(diff * 0.2), 0, 2000);
+            recordTeam(t, +steal, `MIMIC(stolen UNDERDOG SKILL) steal 20% up to 2000`);
+            recordTeam(et, -steal, `MIMIC(stolen UNDERDOG SKILL) stolen by TEAM ${t}`);
+            pushLines.push(`MIMIC ULT: stole UNDERDOG SKILL -> steal ${steal} from TEAM ${et}`);
+          } else {
+            pushLines.push(`MIMIC ULT: stole ${stolen} (no-op)`);
           }
         }
 
@@ -1849,15 +2055,19 @@ export const GamePlayTeamScreen = () => {
         const newLogs = capLogs([...(data.logs || []), ...pushLines.map((x) => `ABILITY: ${x}`)]);
         const newEntries = capEntries([...(entries || []), entry]);
 
-        tx.update(ref, {
+        const updateObj: any = {
           members: mems,
           teamBuffs: teamBuffsTx,
           teamScores: teamScoresTx,
-          turnAbilityUsed: true,
+          turnSkillUsed: kind === 'skill' ? true : (data.turnSkillUsed ?? !!data.turnAbilityUsed ?? false),
+          turnUltUsed: kind === 'ult' ? true : (data.turnUltUsed ?? false),
           abilityFx: fx,
           logs: newLogs,
           logEntries: newEntries,
-        });
+        };
+        if (deckChanged) updateObj.deck = deck;
+
+        tx.update(ref, updateObj);
       });
     } finally {
       setBusy(false);
@@ -1881,16 +2091,28 @@ export const GamePlayTeamScreen = () => {
 
         const data: any = snap.data();
         let mems = (data.members || [])
-          .map((m: any) => ({
-            ...m,
-            score: m.score ?? 0,
-            combo: m.combo ?? 0,
-            buffs: m.buffs ?? {},
-            debuffs: m.debuffs ?? {},
-            role: m.role ? { ...m.role, skillUses: m.role.skillUses ?? 3, ultUses: m.role.ultUses ?? 1 } : null,
-            candidates: Array.isArray(m.candidates) ? m.candidates : null,
-            challenge: m.challenge ?? null,
-          }))
+          .map((m: any) => {
+            const rid: RoleId | undefined = m.role?.id;
+            const uses = defaultRoleUses(rid);
+            const role = m.role
+              ? {
+                  ...m.role,
+                  skillUses: m.role.skillUses ?? uses.skillUses,
+                  ultUses: m.role.ultUses ?? uses.ultUses,
+                }
+              : null;
+
+            return {
+              ...m,
+              score: m.score ?? 0,
+              combo: m.combo ?? 0,
+              buffs: m.buffs ?? {},
+              debuffs: m.debuffs ?? {},
+              role,
+              candidates: Array.isArray(m.candidates) ? m.candidates : null,
+              challenge: m.challenge ?? null,
+            };
+          })
           .slice()
           .sort(sortByTurn);
 
@@ -1913,91 +2135,117 @@ export const GamePlayTeamScreen = () => {
         const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
         const serial = data.turnSerial ?? 0;
 
+        // Seal check (disable passive/skill/ult effects this turn)
+        const sealedThisTurn = (teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0;
+
+        // Neg mitigation check for this team turn (from IRONWALL SKILL/ULT)
+        const negZeroActive = (teamBuffsTx?.[t]?.negZeroTurns ?? 0) > 0;
+        const negHalfActive = !negZeroActive && (teamBuffsTx?.[t]?.negHalfTurns ?? 0) > 0;
+
         const changes: ScoreChange[] = [];
         const notes: string[] = [];
 
-        const hasBarrier = (team: TeamId) => (teamBuffsTx?.[team]?.barrierUntil ?? -1) > serial;
-        const hasIronwall = (team: TeamId) => mems.some((m: any) => m.team === team && m.role?.id === 'ironwall');
+        const hasIronwallPassive = (team: TeamId) => mems.some((m: any) => m.team === team && m.role?.id === 'ironwall');
 
-        const applyTeamDeltaWithMitigation = (team: TeamId, delta: number, reason: string) => {
-          if (delta === 0) return;
+        const mitigateNegative = (team: TeamId, delta: number, reason: string) => {
+          if (delta >= 0) return delta;
 
-          let finalDelta = delta;
+          let d = delta;
 
-          if (finalDelta < 0) {
-            if (hasBarrier(team)) {
-              notes.push(`NOTE TEAM ${team}: BARRIER blocked negative effect (${fmt(finalDelta)}) [${reason}]`);
-              finalDelta = 0;
-            } else if (hasIronwall(team)) {
-              const reduced = roundToStep(finalDelta * 0.7, 100);
-              notes.push(`NOTE TEAM ${team}: IRONWALL reduced (${fmt(finalDelta)} -> ${fmt(reduced)}) [${reason}]`);
-              finalDelta = reduced;
+          // ironwall skill/ult mitigation (active only on that team's turn)
+          if (team === t) {
+            if (negZeroActive) {
+              notes.push(`NOTE TEAM ${team}: IRONWALL ULT -> negative blocked (${fmt(d)}) [${reason}]`);
+              d = 0;
+            } else if (negHalfActive) {
+              const reduced = Math.round(d * 0.5);
+              notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
+              d = reduced;
             }
           }
 
-          if (finalDelta === 0) return;
+          // ironwall passive (disabled while sealed)
+          if (!sealedThisTurn && hasIronwallPassive(team) && d < 0) {
+            const reduced = Math.round(d * 0.7);
+            notes.push(`NOTE TEAM ${team}: IRONWALL PASSIVE reduced (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
+            d = reduced;
+          }
 
-          const from = teamScoresTx[team] ?? 0;
-          const to = from + finalDelta;
-          teamScoresTx = { ...teamScoresTx, [team]: to };
-          changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta: finalDelta, reason });
+          return d;
         };
 
         let singerTurnDelta = 0;
 
         const applySingerDelta = (delta: number, reason: string) => {
           if (delta === 0) return;
+
+          // mitigate negative on singer turn (team turn only)
+          let d = delta;
+          if (d < 0) d = mitigateNegative(t, d, reason);
+
+          if (d === 0) return;
+
           const fromP = singer.score ?? 0;
-          const toP = fromP + delta;
+          const toP = fromP + d;
           singer.score = toP;
-          singerTurnDelta += delta;
-          changes.push({ scope: 'PLAYER', target: singer.name, from: fromP, to: toP, delta, reason });
+          singerTurnDelta += d;
+          changes.push({ scope: 'PLAYER', target: singer.name, from: fromP, to: toP, delta: d, reason });
 
           const fromT = teamScoresTx[t] ?? 0;
-          const toT = fromT + delta;
+          const toT = fromT + d;
           teamScoresTx = { ...teamScoresTx, [t]: toT };
-          changes.push({ scope: 'TEAM', target: `TEAM ${t}`, from: fromT, to: toT, delta, reason: `${reason} (by ${singer.name})` });
+          changes.push({ scope: 'TEAM', target: `TEAM ${t}`, from: fromT, to: toT, delta: d, reason: `${reason} (by ${singer.name})` });
         };
 
-        const applyOtherPlayerDelta = (member: any, delta: number, reason: string) => {
-          if (!member || delta === 0) return;
-          const team: TeamId = member.team;
-          const fromP = member.score ?? 0;
-          const toP = fromP + delta;
-          member.score = toP;
-          changes.push({ scope: 'PLAYER', target: member.name, from: fromP, to: toP, delta, reason });
+        const applyTeamDelta = (team: TeamId, delta: number, reason: string) => {
+          if (delta === 0) return;
 
-          const fromT = teamScoresTx[team] ?? 0;
-          const toT = fromT + delta;
-          teamScoresTx = { ...teamScoresTx, [team]: toT };
-          changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from: fromT, to: toT, delta, reason: `${reason} (by ${member.name})` });
+          let d = delta;
+          if (d < 0) d = mitigateNegative(team, d, reason);
+
+          if (d === 0) return;
+
+          const from = teamScoresTx[team] ?? 0;
+          const to = from + d;
+          teamScoresTx = { ...teamScoresTx, [team]: to };
+          changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta: d, reason });
         };
+
+        // Forced success (coach ult)
+        let effectiveSuccess = isSuccess;
+        if (singer.buffs?.forcedSuccess) {
+          effectiveSuccess = true;
+          notes.push('NOTE COACH ULT: FORCED SUCCESS applied');
+          singer.buffs.forcedSuccess = null;
+        }
 
         const rid: RoleId | undefined = singer.role?.id;
         const sabotage = singer.debuffs?.sabotaged;
         const sabotageActive = !!sabotage;
 
+        const currentChallengeLocal = singer.challenge || { title: '...', criteria: '...' };
+
         if (sabotageActive) {
-          const forced = isSuccess ? 0 : -800;
-          applySingerDelta(forced, `SABOTEUR SKILL (SABOTAGE OVERRIDE: ${isSuccess ? '+0 on success' : '-800 on fail'})`);
+          const forced = effectiveSuccess ? 0 : (sabotage?.fail ?? -1000);
+          applySingerDelta(forced, `SABOTEUR SKILL (SABOTAGE OVERRIDE: ${effectiveSuccess ? '+0 on success' : `${forced}`})`);
           singer.debuffs.sabotaged = null;
           notes.push(`NOTE SABOTAGE: other bonus sources are suppressed for this turn`);
         } else {
-          const base = isSuccess ? BASE_SUCCESS : BASE_FAIL;
-          applySingerDelta(base, isSuccess ? 'BASE SUCCESS' : 'BASE FAIL');
+          const base = effectiveSuccess ? BASE_SUCCESS : BASE_FAIL;
+          applySingerDelta(base, effectiveSuccess ? 'BASE SUCCESS' : 'BASE FAIL');
         }
 
-        if ((teamBuffsTx[t]?.blackoutTurns ?? 0) > 0) {
-          applySingerDelta(-2000, 'SABOTEUR ULT (BLACKOUT: -2000)');
-          teamBuffsTx[t].blackoutTurns = Math.max(0, (teamBuffsTx[t].blackoutTurns ?? 0) - 1);
-        }
+        // Passives / Buffs (disabled if sealed)
+        if (!sealedThisTurn && !sabotageActive) {
+          // SHOWMAN passive
+          if (rid === 'showman' && effectiveSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
 
-        if (!sabotageActive) {
-          if (rid === 'showman' && isSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
-          if (rid === 'saboteur' && isSuccess) applyTeamDeltaWithMitigation(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
+          // SABOTEUR passive
+          if (rid === 'saboteur' && effectiveSuccess) applyTeamDelta(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
 
+          // MAESTRO passive
           if (rid === 'maestro') {
-            if (isSuccess) {
+            if (effectiveSuccess) {
               const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
               singer.combo = nextCombo;
               const bonus = 250 * nextCombo;
@@ -2009,40 +2257,48 @@ export const GamePlayTeamScreen = () => {
             }
           }
 
-          if (rid === 'gambler' && isSuccess) {
-            const choices = [-500, 0, 500, 1000, 1500];
-            const b = choices[Math.floor(Math.random() * choices.length)];
-            applySingerDelta(b, `GAMBLER PASSIVE (RNG bonus)`);
+          // GAMBLER passive (-500..1500 step 250) ; clamp if skill used
+          if (rid === 'gambler' && effectiveSuccess) {
+            const steps = 9; // -500 to 1500 in 250 steps => 9 values
+            const bonus = -500 + 250 * Math.floor(Math.random() * steps); // [-500..1500]
+            const clampFlag = !!singer.buffs?.gamblerSkillClampPassive;
+            const applied = clampFlag && bonus < 0 ? 0 : bonus;
+            if (clampFlag && bonus < 0) notes.push(`NOTE GAMBLER SKILL: PASSIVE clamp (${bonus} -> 0)`);
+            applySingerDelta(applied, `GAMBLER PASSIVE (RNG bonus)`);
           }
 
-          if (rid === 'mimic' && isSuccess) {
+          // MIMIC passive
+          if (rid === 'mimic' && effectiveSuccess) {
             const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
             if (last > 0) {
-              const bonus = roundToStep(last * 0.3, 100);
+              const bonus = Math.round(last * 0.3);
               applySingerDelta(bonus, `MIMIC PASSIVE (30% of last ally success ${last})`);
             }
           }
 
-          if (isSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
+          // TEAM next success bonus
+          if (effectiveSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
             const b = teamBuffsTx[t].nextSuccessBonus;
             applySingerDelta(b, `TEAM BUFF (NEXT SUCCESS BONUS +${b})`);
             teamBuffsTx[t].nextSuccessBonus = 0;
           }
 
-          if (isSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
+          // HYPE ULT team buff
+          if (effectiveSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
             applySingerDelta(500, 'HYPE ULT (success +500)');
           }
-          if ((teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
-            teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
-          }
+        }
 
-          if (isSuccess && (teamBuffsTx[t]?.roarRemaining ?? 0) > 0) {
-            applySingerDelta(500, `ROAR BUFF (+500)`);
-            teamBuffsTx[t].roarRemaining = Math.max(0, (teamBuffsTx[t].roarRemaining ?? 0) - 1);
-          }
+        // Decrement hype ult turns
+        if ((teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
+          teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
+        }
 
+        // Skill/Ult armed effects (disabled if sealed; and also suppressed by sabotage override)
+        if (!sealedThisTurn && !sabotageActive) {
+          // MAESTRO skill
           if (singer.buffs?.maestroSkill) {
-            if (!isSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
+            if (!effectiveSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
             else {
               const before = singer.combo ?? 0;
               const after = clamp(before + 2, 0, 5);
@@ -2052,95 +2308,78 @@ export const GamePlayTeamScreen = () => {
             singer.buffs.maestroSkill = false;
           }
 
+          // SHOWMAN skill
           if (singer.buffs?.encore) {
-            if (isSuccess) applySingerDelta(1200, 'SHOWMAN SKILL (ENCORE +1200 on success)');
+            if (effectiveSuccess) applySingerDelta(500, 'SHOWMAN SKILL (+500 on success)');
             singer.buffs.encore = false;
           }
 
+          // GAMBLER skill (double down)
           if (singer.buffs?.doubleDown) {
-            if (isSuccess) {
+            if (effectiveSuccess) {
               const extra = singerTurnDelta;
               applySingerDelta(extra, 'GAMBLER SKILL (DOUBLE DOWN x2)');
             } else {
               applySingerDelta(-2000, 'GAMBLER SKILL (DOUBLE DOWN fail -2000)');
             }
             singer.buffs.doubleDown = false;
+            singer.buffs.gamblerSkillClampPassive = false;
+          } else {
+            if (singer.buffs?.gamblerSkillClampPassive) singer.buffs.gamblerSkillClampPassive = false;
           }
 
+          // GAMBLER ult coinflip  ★成功時 +5000 に変更
           if (singer.buffs?.gamblerUlt) {
             const head = Math.random() < 0.5;
-            const delta = head ? 4000 : -1000;
-            applySingerDelta(delta, `GAMBLER ULT (coinflip ${head ? 'HEAD +4000' : 'TAIL -1000'})`);
+            const delta = head ? 5000 : -1000;
+            applySingerDelta(delta, `GAMBLER ULT (coinflip ${head ? 'HEAD +5000' : 'TAIL -1000'})`);
             singer.buffs.gamblerUlt = false;
           }
 
+          // SHOWMAN ult (success enemy -2000)
           if (singer.buffs?.spotlight) {
-            if (isSuccess) applyTeamDeltaWithMitigation(et, -2000, 'SHOWMAN ULT (SPOTLIGHT enemy -2000 on success)');
-            else applySingerDelta(-1000, 'SHOWMAN ULT (SPOTLIGHT self -1000 on fail)');
+            if (effectiveSuccess) applyTeamDelta(et, -2000, 'SHOWMAN ULT (success enemy -2000)');
             singer.buffs.spotlight = false;
           }
 
+          // MIMIC skill ECHO
           if (singer.buffs?.echo) {
             const lastTurn = data.lastTurnDelta ?? 0;
-            const add = roundToStep(lastTurn * 0.5, 100);
+            const add = Math.round(lastTurn * 0.5);
             applySingerDelta(add, `MIMIC SKILL (ECHO 50% of last turn ${fmt(lastTurn)})`);
             singer.buffs.echo = false;
           }
 
-          if (isSuccess && singer.buffs?.hypeBoost?.value) {
-            const v = singer.buffs.hypeBoost.value;
-            applySingerDelta(v, 'HYPE SKILL (selected ally success +2000)');
-            singer.buffs.hypeBoost = null;
+          // HYPE skill (next 2 turns success +500)
+          if (singer.buffs?.hypeBoost?.turns) {
+            const turns = singer.buffs.hypeBoost.turns as number;
+            if (effectiveSuccess) applySingerDelta(500, 'HYPE SKILL (success +500)');
+            const next = Math.max(0, turns - 1);
+            singer.buffs.hypeBoost.turns = next;
+            if (next === 0) singer.buffs.hypeBoost = null;
           }
 
-          if (singer.buffs?.stolenSkill) {
-            const stolen: RoleId = singer.buffs.stolenSkill;
-            if (stolen === 'showman') singer.buffs.encore = true;
-            else if (stolen === 'maestro') singer.buffs.maestroSkill = true;
-            else if (stolen === 'gambler') singer.buffs.doubleDown = true;
-            else if (stolen === 'hype') {
-              teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 1000 };
-              notes.push(`NOTE MIMIC ULT: stolen hype -> TEAM ${t} next success +1000`);
-            } else {
-              if (isSuccess) applySingerDelta(800, `MIMIC ULT (stolen default bonus +800)`);
-            }
-            singer.buffs.stolenSkill = null;
-            notes.push(`NOTE MIMIC ULT: applied stolenRole=${stolen}`);
-          }
-
-          if (!isSuccess && singer.buffs?.safe) {
-            applyTeamDeltaWithMitigation(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
+          // COACH skill SAFE
+          if (!effectiveSuccess && singer.buffs?.safe) {
+            applyTeamDelta(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
             singer.buffs.safe = false;
           }
-
-          if (singer.buffs?.clutchDebt) {
-            if (!isSuccess) applySingerDelta(-500, 'UNDERDOG ULT (fail -500)');
-            singer.buffs.clutchDebt = false;
-          }
+        } else {
+          if (sealedThisTurn) notes.push('NOTE SEALED: passive/skill/ult effects disabled');
         }
 
-        if (singer.buffs?.intercept?.by && singerTurnDelta < 0) {
-          const byId = singer.buffs.intercept.by;
-          const tank = mems.find((m: any) => m.id === byId);
-          const penalty = Math.abs(singerTurnDelta);
-
-          applySingerDelta(+penalty, 'IRONWALL SKILL (INTERCEPT: cancel target negative)');
-
-          const transferred = roundToStep(penalty * 0.5, 100);
-          if (tank) {
-            applyOtherPlayerDelta(tank, -transferred, 'IRONWALL SKILL (INTERCEPT: tank takes half)');
-          } else {
-            notes.push(`NOTE INTERCEPT: tank not found (id=${byId})`);
-          }
-
-          singer.buffs.intercept = null;
-        }
-
-        if (isSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: singerTurnDelta };
+        // Save lastTeamDelta for mimic passive
+        if (!sealedThisTurn && effectiveSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: singerTurnDelta };
         else teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: teamBuffsTx[t]?.lastTeamDelta ?? 0 };
 
         const lastTurnDelta = singerTurnDelta;
 
+        // Decrement sealed/neg buffs if active on this team's turn
+        if (sealedThisTurn) teamBuffsTx[t].sealedTurns = Math.max(0, (teamBuffsTx[t].sealedTurns ?? 0) - 1);
+        if (negZeroActive) teamBuffsTx[t].negZeroTurns = Math.max(0, (teamBuffsTx[t].negZeroTurns ?? 0) - 1);
+        else if (negHalfActive) teamBuffsTx[t].negHalfTurns = Math.max(0, (teamBuffsTx[t].negHalfTurns ?? 0) - 1);
+
+        // Next singer & deal mission
         const pool = normalizeThemePool(data.themePool);
         let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
 
@@ -2160,7 +2399,7 @@ export const GamePlayTeamScreen = () => {
         const nextIndex = findNextReadyIndex(mems, idx);
         const nextSingerLocal = mems[nextIndex] || singer;
 
-        const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx);
+        const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx, teamBuffsTx);
         const auraChanges: ScoreChange[] = [];
         for (const ap of auraPlans) {
           const from = teamScoresTx[ap.team] ?? 0;
@@ -2174,7 +2413,7 @@ export const GamePlayTeamScreen = () => {
         const changeLines = changes.map(fmtChangeLine);
         const auraLines = auraChanges.map(fmtChangeLine);
 
-        const themeLine = `THEME ${cardTitle(currentChallenge)} / ${cardCriteria(currentChallenge)}`;
+        const themeLine = `THEME ${cardTitle(currentChallengeLocal)} / ${cardCriteria(currentChallengeLocal)}`;
 
         const resultEntry: LogEntry = {
           ts: Date.now(),
@@ -2182,7 +2421,7 @@ export const GamePlayTeamScreen = () => {
           actorName: singer.name,
           actorId: singer.id,
           team: singer.team,
-          title: `${isSuccess ? 'SUCCESS' : 'FAIL'} / ${singer.role?.name || 'ROLE'}`,
+          title: `${effectiveSuccess ? 'SUCCESS' : 'FAIL'} / ${singer.role?.name || 'ROLE'}`,
           lines: [
             themeLine,
             `NOTE TURN DELTA (net): ${fmt(singerTurnDelta)}`,
@@ -2215,11 +2454,11 @@ export const GamePlayTeamScreen = () => {
           return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
         });
 
-        const resultTitle = `${isSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
+        const resultTitle = `${effectiveSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
 
         const newLogs = capLogs([
           ...(data.logs || []),
-          `RESULT: ${singer.name} ${isSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t}) net ${fmt(singerTurnDelta)}`,
+          `RESULT: ${singer.name} ${effectiveSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t}) net ${fmt(singerTurnDelta)}`,
           ...changeLines.map((x) => ` - ${x}`),
           ...(notes.length ? notes.map((x) => ` - ${x}`) : []),
           `TURN START: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
@@ -2236,9 +2475,11 @@ export const GamePlayTeamScreen = () => {
           themePool: pool,
           logs: newLogs,
           logEntries: newEntries,
-          turnAbilityUsed: false,
+          turnSkillUsed: false,
+          turnUltUsed: false,
           lastTurnDelta,
           lastLog: { timestamp: Date.now(), title: resultTitle, detail: overlayTeamLines.join('\n') },
+          turnAbilityUsed: false,
         });
       });
     } finally {
@@ -2247,13 +2488,12 @@ export const GamePlayTeamScreen = () => {
   };
 
   // =========================
-  // End game (★ログ削除追加)
+  // End game (ログ削除)
   // =========================
   const endGame = async () => {
     if (!roomId || !isHost) return;
     const roomRef = doc(db, 'rooms', roomId);
 
-    // ★ ゲーム終了時にログ/オーバーレイ系をクリアして、再プレイ時に残らないようにする
     await updateDoc(roomRef, {
       status: 'finished',
       logs: [],
@@ -2261,6 +2501,8 @@ export const GamePlayTeamScreen = () => {
       lastLog: null,
       abilityFx: null,
       lastTurnDelta: 0,
+      turnSkillUsed: false,
+      turnUltUsed: false,
       turnAbilityUsed: false,
     });
 
@@ -2320,10 +2562,14 @@ export const GamePlayTeamScreen = () => {
           const action = targetModal?.action;
           setTargetModal(null);
           if (!action) return;
+
+          if ((action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy') && !mimicStolenRoleId) return;
+
           requestConfirmTarget(action, id);
         }}
       />
 
+      {/* PROXY modal */}
       <AnimatePresence>
         {proxyTarget && (
           <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
@@ -2361,6 +2607,7 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
+      {/* Logs Drawer */}
       <AnimatePresence>
         {showLogsDrawer && (
           <div className="fixed inset-0 z-[210] flex justify-end">
@@ -2413,7 +2660,7 @@ export const GamePlayTeamScreen = () => {
 
                       <div className="mt-2 space-y-1">
                         {e.lines.map((l, idx2) => {
-                          const neg = l.includes('-');
+                          const neg = l.includes('(-') || l.includes(' -') || l.includes('-');
                           const pos = l.includes('+');
                           const cls = neg ? 'text-red-300' : pos ? 'text-cyan-200' : 'text-white/70';
                           return (
@@ -2437,6 +2684,7 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
+      {/* Host missing */}
       <AnimatePresence>
         {!isHost && isHostMissing && (
           <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
@@ -2464,6 +2712,7 @@ export const GamePlayTeamScreen = () => {
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col h-full relative z-10 min-w-0">
+        {/* Header */}
         <div className="flex-none h-14 md:h-20 flex items-center justify-between px-2 md:px-6 border-b border-white/10 bg-black/20 backdrop-blur-md overflow-hidden gap-2">
           <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0 overflow-hidden">
             <div className="flex-none w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center text-xl shadow-[0_0_15px_cyan] border border-white/20 font-bold">
@@ -2516,6 +2765,7 @@ export const GamePlayTeamScreen = () => {
           </div>
         </div>
 
+        {/* Effects row */}
         <div className="flex-none px-2 md:px-6 py-2 border-b border-white/10 bg-black/10">
           <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">ACTIVE EFFECTS</div>
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
@@ -2531,6 +2781,7 @@ export const GamePlayTeamScreen = () => {
           </div>
         </div>
 
+        {/* Center */}
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 md:p-4 relative w-full overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
             <div className="w-[120%] aspect-square border border-cyan-500/20 rounded-full animate-[spin_20s_linear_infinite] max-h-[520px]" />
@@ -2576,6 +2827,7 @@ export const GamePlayTeamScreen = () => {
           </AnimatePresence>
         </div>
 
+        {/* Bottom controls */}
         <div className="flex-none px-2 pb-2 md:pb-10 pt-1 bg-gradient-to-t from-black/90 to-transparent z-20 w-full">
           <div className="flex gap-2 md:gap-6 w-full max-w-5xl mx-auto">
             {canControlTurn ? (
@@ -2628,10 +2880,17 @@ export const GamePlayTeamScreen = () => {
               >
                 ULT ({currentSinger?.role?.ultUses ?? 0})
               </button>
+
+              {sealedThisTurnClient && (
+                <div className="text-[9px] font-mono tracking-widest text-red-300 border border-red-500/30 bg-red-500/10 rounded-lg px-2 py-1">
+                  SEALED: PASSIVE/SKILL/ULT DISABLED
+                </div>
+              )}
             </div>
           </div>
         </div>
 
+        {/* Mobile reservation */}
         <div className="md:hidden w-full bg-black/80 backdrop-blur-md border-t border-white/10 p-1.5 pb-4 flex flex-col gap-1 flex-none">
           <div className="flex justify-between items-center px-1">
             <span className="text-[8px] font-bold text-gray-500 tracking-widest">RESERVATION LIST</span>
@@ -2704,6 +2963,7 @@ export const GamePlayTeamScreen = () => {
         </div>
       </div>
 
+      {/* Desktop reservation */}
       <div className="hidden md:flex w-[320px] lg:w-[380px] flex-none bg-black/60 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
         <div className="p-4 md:p-6 border-b border-white/10 bg-white/5 flex-none">
           <div className="flex items-center justify-between">
@@ -2796,6 +3056,7 @@ export const GamePlayTeamScreen = () => {
         )}
       </div>
 
+      {/* Finish modal */}
       <AnimatePresence>
         {showFinishModal && (
           <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
