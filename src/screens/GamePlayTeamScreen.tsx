@@ -135,8 +135,8 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'THE MAESTRO',
     type: 'ATK',
     sigil: '⬢',
-    passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅＆-1000。',
-    // ★変更
+    // ★変更：失敗時は「コンボ消滅だけ」
+    passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
     skill: 'SKILL: (3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
     ult: 'ULT: (1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
   },
@@ -145,7 +145,6 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'SHOWMAN',
     type: 'ATK',
     sigil: '◆',
-    // ★変更
     passive: 'PASSIVE：成功時、常時 +500。失敗は基本0。',
     skill: 'SKILL: (3回) ENCORE：成功時さらに+1200。失敗しても0。',
     ult: 'ULT: (1回) SPOTLIGHT：成功なら敵チーム-2000 / 失敗なら自分-1000(例外)',
@@ -175,7 +174,6 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '⟁',
     passive: '自分のターンはお題3択。',
     skill: 'SKILL: (3回) REROLL：自分or味方のお題を引き直し（3択維持）。',
-    // ★イベント廃止に伴い変更（イベント参照を消す）
     ult: 'ULT: (1回) FATE SHIFT：味方チームの「次成功ボーナス +1500」（1回）',
   },
   {
@@ -193,9 +191,7 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'SUP',
     sigil: '✦',
     passive: '自分ターン開始時、チーム+400（結果に依存しない）。',
-    // ★変更
     skill: 'SKILL: (3回) 選んだ味方の「次の成功時 +2000」(1回)',
-    // ★変更
     ult: 'ULT: (1回) 以降3ターン、味方全員の成功スコア +500',
   },
   {
@@ -204,9 +200,7 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'TEC',
     sigil: '☒',
     passive: '自分成功で敵チーム-300。',
-    // ★変更
     skill: 'SKILL: (3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -800（1回）',
-    // ★変更（イベント廃止でも「最悪の出来事」効果として実装）
     ult: 'ULT: (1回) BLACKOUT：敵チームに「最悪の出来事」を強制（次の敵ターン -2000）',
   },
   {
@@ -214,11 +208,8 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'UNDERDOG',
     type: 'DEF',
     sigil: '⬟',
-    // ★変更
     passive: 'PASSIVE：負けている時、自分のターン開始時に +500。',
-    // ★変更
     skill: 'SKILL: (3回) 現在の点差の20%を相手から奪う（最大2000）。',
-    // ★変更
     ult: 'ULT: (1回) 劣勢時限定：チームに +2000。失敗時は -500（このターン）',
   },
   {
@@ -226,10 +217,8 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'GAMBLER',
     type: 'TEC',
     sigil: '🎲',
-    // ★変更
     passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（500刻み）。',
     skill: 'SKILL: (3回) DOUBLE DOWN：成功×2 / 失敗-2000(例外)',
-    // ★変更
     ult: 'ULT: (1回) 表なら +4000 ／ 裏なら -1000。',
   },
 ];
@@ -319,7 +308,7 @@ const computeStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number
   if (mems.some((m) => m.team === t && m.role?.id === 'coach')) add += 150;
   // hype passive
   if (nextSinger?.role?.id === 'hype') add += 400;
-  // underdog passive ★変更：+500
+  // underdog passive
   if (nextSinger?.role?.id === 'underdog') {
     if ((teamScores[t] ?? 0) < (teamScores[et] ?? 0)) add += 500;
   }
@@ -438,7 +427,6 @@ const AbilityFxOverlay = ({ fx, onDone }: { fx: AbilityFx; onDone: () => void })
       onDoneRef.current?.();
     }, 1400);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ts]);
 
   if (!fx) return null;
@@ -706,12 +694,111 @@ const TargetModal = ({
                   <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{m.avatar}</div>
                   <div className="flex-1 min-w-0">
                     <div className="font-bold truncate">{m.name}</div>
-                    <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">TEAM {m.team} ・ {m.role?.name || '—'}</div>
+                    <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">
+                      TEAM {m.team} ・ ROLE {m.role?.name || '—'}
+                    </div>
                   </div>
                 </div>
               </button>
             ))}
             {targets.length === 0 && <div className="text-[12px] text-white/50 font-mono tracking-widest">NO VALID TARGET</div>}
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+// =========================
+// Guide Modal (復帰)
+// =========================
+const GuideModal = ({
+  open,
+  onClose,
+  members,
+  usedRoleIds,
+}: {
+  open: boolean;
+  onClose: () => void;
+  members: any[];
+  usedRoleIds: Set<RoleId>;
+}) => {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[255] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 20, scale: 0.96 }}
+        className="relative w-full max-w-4xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="rounded-xl p-5 md:p-6 bg-gradient-to-b from-white/5 to-black/40">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xl md:text-2xl font-black tracking-widest text-cyan-200">GUIDE</div>
+              <div className="text-[11px] font-mono tracking-widest text-white/50 mt-1">
+                参加メンバーのロール説明（途中参加・ゲスト・オフライン含む）
+              </div>
+            </div>
+            <button onClick={onClose} className="w-10 h-10 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center">
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 space-y-3">
+            {members.map((m) => {
+              const rid: RoleId | undefined = m.role?.id;
+              const def = rid ? roleDef(rid) : null;
+              const isGuest = String(m.id).startsWith('guest_');
+              const team = m.team || '?';
+              const roleName = m.role?.name || (rid ? def?.name : 'NO ROLE');
+              const usedBadge = rid && usedRoleIds.has(rid) ? 'USED' : null;
+
+              return (
+                <div key={m.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">
+                      {m.avatar || '🎤'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="font-black truncate">{m.name || 'PLAYER'}</div>
+                        {isGuest && <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded font-black">GUEST</span>}
+                        {m.team === 'A' && <span className="text-[9px] bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 px-2 py-0.5 rounded font-black">TEAM A</span>}
+                        {m.team === 'B' && <span className="text-[9px] bg-red-500/20 text-red-200 border border-red-500/30 px-2 py-0.5 rounded font-black">TEAM B</span>}
+                      </div>
+                      <div className="text-[10px] font-mono tracking-widest text-white/50 truncate">
+                        ROLE: <span className="text-white/80">{roleName}</span>
+                        {usedBadge && <span className="ml-2 text-[9px] px-2 py-0.5 rounded bg-white/5 border border-white/10">IN USE</span>}
+                      </div>
+                    </div>
+                    <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">
+                      {team !== '?' ? `TEAM ${team}` : 'TEAM ?'}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">PASSIVE</div>
+                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.passive || '未選択 / ロール未決定'}</div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">SKILL</div>
+                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.skill || '—'}</div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">ULT</div>
+                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.ult || '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {members.length === 0 && <div className="text-[11px] text-white/40 font-mono tracking-widest">NO MEMBERS</div>}
           </div>
         </div>
       </motion.div>
@@ -786,7 +873,7 @@ export const GamePlayTeamScreen = () => {
   // UI
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showLogsDrawer, setShowLogsDrawer] = useState(false);
-  const [showRoleInfo, setShowRoleInfo] = useState(false);
+  const [showGuide, setShowGuide] = useState(false); // ★ガイド復帰
 
   const [busy, setBusy] = useState(false);
   const [targetModal, setTargetModal] = useState<TargetModalState>(null);
@@ -919,8 +1006,7 @@ export const GamePlayTeamScreen = () => {
     setJoinStep(null);
   }, [roomData?.status, roomData?.mode, myMember?.team, myMember?.role?.id]);
 
- 
- const teamCounts = useMemo(() => {
+  const teamCounts = useMemo(() => {
     return {
       A: sortedMembers.filter((m) => m.team === 'A').length,
       B: sortedMembers.filter((m) => m.team === 'B').length,
@@ -938,7 +1024,7 @@ export const GamePlayTeamScreen = () => {
   }, [sortedMembers]);
 
   // =========================
-  // Init (host) — event関連は完全削除
+  // Init (host)
   // =========================
   useEffect(() => {
     if (!roomId || !roomData || !isHost) return;
@@ -988,7 +1074,6 @@ export const GamePlayTeamScreen = () => {
           role: m.role
             ? {
                 ...m.role,
-                // ★スキル回数 3回
                 skillUses: m.role.skillUses ?? 3,
                 ultUses: m.role.ultUses ?? 1,
               }
@@ -1084,7 +1169,9 @@ export const GamePlayTeamScreen = () => {
   // Control permissions
   // =========================
   const canControlTurn = isHost || currentSinger?.id === userId;
-  const canOperateAbility = currentSinger?.id === userId || (isHost && (isGuestTurn || (currentSinger && offlineUsers.has(currentSinger.id))));
+
+  const canOperateAbility =
+    currentSinger?.id === userId || (isHost && (isGuestTurn || (currentSinger && offlineUsers.has(currentSinger.id))));
 
   const canUseSkill = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.skillUses ?? 0) > 0;
   const canUseUlt = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.ultUses ?? 0) > 0;
@@ -1098,13 +1185,6 @@ export const GamePlayTeamScreen = () => {
   const isCurrentSingerLocked = !!currentSinger?.candidates && currentSinger.candidates.length > 0;
 
   const currentChallenge = currentSinger?.challenge || { title: 'お題準備中...', criteria: '...' };
-
-  // ===== Role Info target =====
-  const roleInfoTarget = useMemo(() => {
-    if (!myMember) return null;
-    if (isHost && isGuestTurn) return currentSinger;
-    return myMember;
-  }, [myMember, isHost, isGuestTurn, currentSinger]);
 
   // ===== Effects chips =====
   const activeEffects = useMemo(() => {
@@ -1386,7 +1466,7 @@ export const GamePlayTeamScreen = () => {
         if (used.has(def.id)) throw new Error('RoleAlreadyUsed');
 
         const updated = { ...(mems[idx] || {}) };
-        updated.role = { id: def.id, name: def.name, skillUses: 3, ultUses: 1 }; // ★スキル3回
+        updated.role = { id: def.id, name: def.name, skillUses: 3, ultUses: 1 };
         updated.score = updated.score ?? 0;
         updated.combo = updated.combo ?? 0;
         updated.buffs = updated.buffs ?? {};
@@ -1519,7 +1599,7 @@ export const GamePlayTeamScreen = () => {
               <div className="min-w-0">
                 <div className="font-black truncate text-white">{target.name}</div>
                 <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">
-                  TEAM {target.team} ・ {target.role?.name || '—'}
+                  TEAM {target.team} ・ ROLE {target.role?.name || '—'}
                 </div>
               </div>
             </div>
@@ -1578,8 +1658,7 @@ export const GamePlayTeamScreen = () => {
         if (data.turnAbilityUsed) return;
 
         const canOperate =
-          singer.id === userId ||
-          (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
+          singer.id === userId || (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
         if (!canOperate) return;
 
         const r: RoleId | undefined = singer.role?.id;
@@ -1616,7 +1695,6 @@ export const GamePlayTeamScreen = () => {
             singer.buffs.doubleDown = true;
             pushLines.push(`SKILL GAMBLER: DOUBLE DOWN armed (success x2 / fail -2000)`);
           } else if (r === 'underdog') {
-            // ★変更：点差の20%奪う（最大2000）
             const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
             const steal = clamp(roundToStep(diff * 0.2, 100), 0, 2000);
             teamScoresTx = {
@@ -1722,14 +1800,13 @@ export const GamePlayTeamScreen = () => {
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
             pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
           } else if (r === 'saboteur') {
-            // ★「最悪の出来事」: 次の敵ターン -2000
             teamBuffsTx[et] = { ...(teamBuffsTx[et] || {}), blackoutTurns: 1 };
             pushLines.push(`ULT SABOTEUR: BLACKOUT -> TEAM ${et} next turn -2000`);
           } else if (r === 'underdog') {
             const losing = (teamScoresTx[t] ?? 0) < (teamScoresTx[et] ?? 0);
-            if (!losing) return; // 劣勢時限定
+            if (!losing) return;
             teamScoresTx = { ...teamScoresTx, [t]: (teamScoresTx[t] ?? 0) + 2000 };
-            singer.buffs.clutchDebt = true; // このターン失敗時 -500
+            singer.buffs.clutchDebt = true;
             pushLines.push(`ULT UNDERDOG: team +2000 (if fail -500 this turn)`);
           } else if (r === 'gambler') {
             singer.buffs.gamblerUlt = true;
@@ -1757,7 +1834,7 @@ export const GamePlayTeamScreen = () => {
         };
 
         const newLogs = capLogs([...(data.logs || []), ...pushLines.map((x) => `ABILITY: ${x}`)]);
-        const newEntries = capEntries([...entries, entry]);
+        const newEntries = capEntries([...(entries || []), entry]);
 
         tx.update(ref, {
           members: mems,
@@ -1823,7 +1900,7 @@ export const GamePlayTeamScreen = () => {
 
         const logLines: string[] = [];
 
-        // ===== Team-wide special negative: BLACKOUT (saboteur ULT) =====
+        // BLACKOUT
         if ((teamBuffsTx[t]?.blackoutTurns ?? 0) > 0) {
           selfDelta -= 2000;
           teamBuffsTx[t].blackoutTurns = Math.max(0, (teamBuffsTx[t].blackoutTurns ?? 0) - 1);
@@ -1832,21 +1909,19 @@ export const GamePlayTeamScreen = () => {
 
         const rid: RoleId | undefined = singer.role?.id;
 
-        // ===== SABOTEUR SKILL debuff: success +0 / fail -800 =====
+        // SABOTEUR SKILL debuff
         const sabotage = singer.debuffs?.sabotaged;
         if (sabotage) {
-          // override at the end, but keep note now
           logLines.push(`SABOTAGE ACTIVE`);
         }
 
-        // ===== Passives / base role adjustments =====
-        // showman passive ★変更：+500
+        // showman passive
         if (rid === 'showman' && isSuccess) selfDelta += 500;
 
         // saboteur passive
         if (rid === 'saboteur' && isSuccess) enemyTeamDelta -= 300;
 
-        // maestro passive
+        // maestro passive ★変更：失敗はコンボ消滅のみ（減点なし）
         if (rid === 'maestro') {
           if (isSuccess) {
             const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
@@ -1855,13 +1930,14 @@ export const GamePlayTeamScreen = () => {
             selfDelta += bonus;
             logLines.push(`COMBO x${nextCombo} (+${bonus})`);
           } else {
+            const had = singer.combo ?? 0;
             singer.combo = 0;
-            selfDelta -= 1000;
-            logLines.push(`COMBO BROKEN (-1000)`);
+            if (had > 0) logLines.push(`COMBO BROKEN (no penalty)`);
           }
         }
 
-        // gambler passive ★変更：-500〜1500（500刻み）
+        
+// gambler passive
         if (rid === 'gambler' && isSuccess) {
           const choices = [-500, 0, 500, 1000, 1500];
           const b = choices[Math.floor(Math.random() * choices.length)];
@@ -1879,8 +1955,7 @@ export const GamePlayTeamScreen = () => {
           }
         }
 
-        // ===== Team buffs =====
-        // nextSuccessBonus
+        // team nextSuccessBonus
         if (isSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
           const b = teamBuffsTx[t].nextSuccessBonus;
           selfDelta += b;
@@ -1888,26 +1963,23 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`TEAM BONUS +${b}`);
         }
 
-        // hype ult: allies success +500 for 3 turns
+        // hype ult
         if (isSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
           selfDelta += 500;
           logLines.push(`HYPE ULT +500`);
         }
-
-        // decrement hypeUltTurns per ally turn (success/fail問わず)
         if ((teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
           teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
         }
 
-        // roar (旧仕様が残る場合に備えて維持)
+        // roar (旧)
         if (isSuccess && (teamBuffsTx[t]?.roarRemaining ?? 0) > 0) {
           selfDelta += 500;
           teamBuffsTx[t].roarRemaining = Math.max(0, (teamBuffsTx[t].roarRemaining ?? 0) - 1);
           logLines.push(`ROAR +500 (remain ${teamBuffsTx[t].roarRemaining})`);
         }
 
-        // ===== Armed buffs on singer =====
-        // maestro skill ★変更
+        // ===== Armed buffs =====
         if (singer.buffs?.maestroSkill) {
           if (isSuccess) {
             const before = singer.combo ?? 0;
@@ -1921,14 +1993,12 @@ export const GamePlayTeamScreen = () => {
           singer.buffs.maestroSkill = false;
         }
 
-        // showman skill ENCORE
         if (singer.buffs?.encore) {
           if (isSuccess) selfDelta += 1200;
           singer.buffs.encore = false;
           logLines.push(`ENCORE ${isSuccess ? '+1200' : '+0'}`);
         }
 
-        // gambler skill DOUBLE DOWN
         if (singer.buffs?.doubleDown) {
           if (isSuccess) selfDelta = selfDelta * 2;
           else selfDelta -= 2000;
@@ -1936,7 +2006,6 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`DOUBLE DOWN ${isSuccess ? 'x2' : '-2000'}`);
         }
 
-        // gambler ult ★変更：coinflip +4000 / -1000 (success関係なく適用)
         if (singer.buffs?.gamblerUlt) {
           const head = Math.random() < 0.5;
           const delta = head ? 4000 : -1000;
@@ -1945,7 +2014,6 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`GAMBLER ULT ${head ? '+4000' : '-1000'}`);
         }
 
-        // showman ult SPOTLIGHT
         if (singer.buffs?.spotlight) {
           if (isSuccess) enemyTeamDelta -= 2000;
           else selfDelta -= 1000;
@@ -1953,7 +2021,6 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`SPOTLIGHT ${isSuccess ? 'enemy -2000' : 'self -1000'}`);
         }
 
-        // mimic skill ECHO
         if (singer.buffs?.echo) {
           const lastTurn = data.lastTurnDelta ?? 0;
           const add = roundToStep(lastTurn * 0.5, 100);
@@ -1962,7 +2029,6 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`ECHO ${fmt(add)} (from last ${fmt(lastTurn)})`);
         }
 
-        // hype skill target bonus (+2000 on next success)
         if (isSuccess && singer.buffs?.hypeBoost?.value) {
           const v = singer.buffs.hypeBoost.value;
           selfDelta += v;
@@ -1970,14 +2036,12 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`HYPE BOOST +${v}`);
         }
 
-        // stolen skill mapping (mimic ult)
         if (singer.buffs?.stolenSkill) {
           const stolen: RoleId = singer.buffs.stolenSkill;
           if (stolen === 'showman') singer.buffs.encore = true;
           else if (stolen === 'maestro') singer.buffs.maestroSkill = true;
           else if (stolen === 'gambler') singer.buffs.doubleDown = true;
           else if (stolen === 'hype') {
-            // mimic steals "hype boost" as team next success +1000 (簡易)
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 1000 };
           } else {
             if (isSuccess) selfDelta += 800;
@@ -1986,14 +2050,12 @@ export const GamePlayTeamScreen = () => {
           logLines.push(`STEAL ROLE applied: ${stolen}`);
         }
 
-        // coach skill SAFE: failでもチーム+300
         if (!isSuccess && singer.buffs?.safe) {
           teamDelta += 300;
           singer.buffs.safe = false;
           logLines.push(`SAFE TRIGGER team +300`);
         }
 
-        // ironwall skill INTERCEPT: transfer half of negative to tank
         if (selfDelta < 0 && singer.buffs?.intercept?.by) {
           const byId = singer.buffs.intercept.by;
           const tank = mems.find((m: any) => m.id === byId);
@@ -2006,26 +2068,23 @@ export const GamePlayTeamScreen = () => {
           singer.buffs.intercept = null;
         }
 
-        // underdog ult ★変更：劣勢時 team +2000（発動済）/ fail -500
         if (!isSuccess && singer.buffs?.clutchDebt) {
           selfDelta -= 500;
           singer.buffs.clutchDebt = false;
           logLines.push(`UNDERDOG ULT FAIL -500`);
         } else if (singer.buffs?.clutchDebt) {
-          // 成功ならただ消す
           singer.buffs.clutchDebt = false;
         }
 
-        // ===== SABOTEUR SKILL override (final override) =====
+        // SABOTAGE override
         if (sabotage) {
           const forced = isSuccess ? 0 : -800;
-          // 「敵は +0 / -800」なので最終selfDeltaを上書き
           selfDelta = forced;
           singer.debuffs.sabotaged = null;
           logLines.push(`SABOTAGE OVERRIDE -> ${fmt(forced)}`);
         }
 
-        // ===== barrier / ironwall reduction (team negative only) =====
+        // barrier / ironwall reduce team negative
         const serial = data.turnSerial ?? 0;
         const barrierActive = (teamBuffsTx[t]?.barrierUntil ?? -1) > serial;
         const ironwallActive = mems.some((m: any) => m.team === t && m.role?.id === 'ironwall');
@@ -2054,7 +2113,7 @@ export const GamePlayTeamScreen = () => {
           }
         }
 
-        // ===== Apply to scores =====
+        // Apply
         singer.score = (singer.score ?? 0) + selfDelta;
 
         const prevTS = { ...teamScoresTx };
@@ -2070,7 +2129,7 @@ export const GamePlayTeamScreen = () => {
 
         const lastTurnDelta = selfDelta;
 
-        // ===== Deal next mission to singer =====
+        // Deal next mission to singer
         const pool = normalizeThemePool(data.themePool);
         let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
 
@@ -2087,7 +2146,7 @@ export const GamePlayTeamScreen = () => {
           singer.challenge = dealt.picked ?? { title: 'FREE THEME', criteria: '—' };
         }
 
-        // ===== Move turn =====
+        // Move turn
         const nextIndex = findNextReadyIndex(mems, idx);
         const nextSingerLocal = mems[nextIndex] || singer;
 
@@ -2097,7 +2156,7 @@ export const GamePlayTeamScreen = () => {
 
         const nextSerial = serial + 1;
 
-        // ===== Detailed Logs =====
+        // Detailed logs
         const resultTitle = `${isSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
         const detailLines: string[] = [];
         detailLines.push(`PLAYER ${singer.name} (${singer.role?.name || '—'}) => ${fmt(selfDelta)}`);
@@ -2206,6 +2265,18 @@ export const GamePlayTeamScreen = () => {
       {/* Confirm modal */}
       <ConfirmModal state={confirmState} busy={busy} onClose={() => !busy && setConfirmState(null)} />
 
+      {/* GUIDE modal (復帰) */}
+      <AnimatePresence>
+        {showGuide && (
+          <GuideModal
+            open={showGuide}
+            onClose={() => setShowGuide(false)}
+            members={sortedMembers}
+            usedRoleIds={usedRoleIds}
+          />
+        )}
+      </AnimatePresence>
+
       {/* JOIN WIZARD */}
       <JoinTeamRoleModal
         isOpen={joinStep !== null}
@@ -2271,7 +2342,7 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* LOG drawer (more detailed) */}
+      {/* LOG drawer */}
       <AnimatePresence>
         {showLogsDrawer && (
           <div className="fixed inset-0 z-[210] flex justify-end">
@@ -2388,7 +2459,9 @@ export const GamePlayTeamScreen = () => {
               <motion.p key={currentSinger?.id || 'none'} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="text-white font-black leading-none truncate drop-shadow-md text-base md:text-[clamp(1.2rem,3vw,2.6rem)]">
                 {currentSinger?.name || '...'}
               </motion.p>
-              <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">TEAM {currentSinger?.team || '?'} ・ ROLE {currentSinger?.role?.name || '—'}</div>
+              <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">
+                TEAM {currentSinger?.team || '?'} ・ ROLE {currentSinger?.role?.name || '—'}
+              </div>
             </div>
           </div>
 
@@ -2401,12 +2474,13 @@ export const GamePlayTeamScreen = () => {
               🧾
             </button>
 
+            {/* ★GUIDEボタン復帰 */}
             <button
-              onClick={() => setShowRoleInfo((v) => !v)}
+              onClick={() => setShowGuide(true)}
               className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-yellow-300 hover:bg-yellow-900/30 hover:border-yellow-500 transition-all active:scale-95"
-              title="ROLE INFO"
+              title="GUIDE"
             >
-              🎭
+              📘
             </button>
 
             <div className="flex items-center gap-2">
@@ -2438,47 +2512,6 @@ export const GamePlayTeamScreen = () => {
             )}
           </div>
         </div>
-
-        {/* Role info collapsible */}
-        <AnimatePresence>
-          {showRoleInfo && roleInfoTarget?.role?.id && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex-none px-2 md:px-6 py-3 border-b border-white/10 bg-black/20">
-              <div className="max-w-5xl mx-auto">
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-mono tracking-widest text-white/40">ROLE INFO {isHost && isGuestTurn ? '(GUEST TURN)' : ''}</div>
-                  <button onClick={() => setShowRoleInfo(false)} className="text-xs text-white/50 hover:text-white">
-                    CLOSE
-                  </button>
-                </div>
-
-                <div className="mt-2 p-3 rounded-xl border border-white/10 bg-white/5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{roleDef(roleInfoTarget.role.id)?.sigil || '🎭'}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-black truncate">{roleInfoTarget.role.name}</div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">FOR: {roleInfoTarget.name}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 text-[12px] text-white/70 leading-relaxed space-y-2">
-                    <div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/40">PASSIVE</div>
-                      <div>{roleDef(roleInfoTarget.role.id)?.passive}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/40">SKILL</div>
-                      <div>{roleDef(roleInfoTarget.role.id)?.skill}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/40">ULT</div>
-                      <div>{roleDef(roleInfoTarget.role.id)?.ult}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* Main Area */}
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 md:p-4 relative w-full overflow-hidden">
@@ -2588,11 +2621,19 @@ export const GamePlayTeamScreen = () => {
         <div className="md:hidden w-full bg-black/80 backdrop-blur-md border-t border-white/10 p-1.5 pb-4 flex flex-col gap-1 flex-none">
           <div className="flex justify-between items-center px-1">
             <span className="text-[8px] font-bold text-gray-500 tracking-widest">RESERVATION LIST</span>
-            {isHost && (
-              <button onClick={() => setShowFinishModal(true)} className="text-[8px] text-red-400 border border-red-500/30 px-2 py-0.5 rounded hover:bg-red-900/30">
-                FINISH
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowGuide(true)}
+                className="text-[8px] text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 rounded hover:bg-yellow-500/20"
+              >
+                GUIDE
               </button>
-            )}
+              {isHost && (
+                <button onClick={() => setShowFinishModal(true)} className="text-[8px] text-red-400 border border-red-500/30 px-2 py-0.5 rounded hover:bg-red-900/30">
+                  FINISH
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex overflow-x-auto gap-2 pb-1 custom-scrollbar snap-x">
@@ -2602,11 +2643,12 @@ export const GamePlayTeamScreen = () => {
               const isGuest = String(member.id).startsWith('guest_');
 
               const challenge = member.challenge || { title: '...', criteria: '...' };
+              const roleLabel = member.role?.name || '—';
 
               return (
                 <div
                   key={member.id}
-                  className={`snap-start flex-none w-40 bg-white/5 border ${isCurrent ? 'border-cyan-500 bg-cyan-900/20' : 'border-white/10'} rounded-lg p-2 flex flex-col gap-1 relative overflow-hidden ${isOffline ? 'grayscale opacity-70' : ''}`}
+                  className={`snap-start flex-none w-44 bg-white/5 border ${isCurrent ? 'border-cyan-500 bg-cyan-900/20' : 'border-white/10'} rounded-lg p-2 flex flex-col gap-1 relative overflow-hidden ${isOffline ? 'grayscale opacity-70' : ''}`}
                 >
                   {isCurrent && <div className="absolute top-0 right-0 bg-cyan-500 text-black text-[6px] font-bold px-1 py-0.5 rounded-bl">NOW</div>}
                   {isGuest && <div className="absolute top-0 left-0 bg-purple-600 text-white text-[6px] font-bold px-1 py-0.5 rounded-br">GUEST</div>}
@@ -2615,7 +2657,11 @@ export const GamePlayTeamScreen = () => {
                     <div className="text-lg">{member.avatar}</div>
                     <div className="flex-1 min-w-0">
                       <div className={`text-[10px] font-bold truncate ${isCurrent ? 'text-white' : 'text-gray-300'}`}>{member.name}</div>
-                      <div className="text-[8px] font-mono text-white/40 truncate">TEAM {member.team || '?'} ・ {(member.score || 0).toLocaleString()} pt</div>
+                      {/* ★ロール表示追加 */}
+                      <div className="text-[8px] font-mono text-white/50 truncate">
+                        TEAM {member.team || '?'} ・ ROLE {roleLabel}
+                      </div>
+                      <div className="text-[8px] font-mono text-white/40 truncate">{(member.score || 0).toLocaleString()} pt</div>
                     </div>
                   </div>
 
@@ -2651,11 +2697,21 @@ export const GamePlayTeamScreen = () => {
       {/* Desktop Reservation List */}
       <div className="hidden md:flex w-[320px] lg:w-[380px] flex-none bg-black/60 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
         <div className="p-4 md:p-6 border-b border-white/10 bg-white/5 flex-none">
-          <h3 className="text-xs md:text-sm font-bold text-white tracking-widest flex items-center gap-2">
-            <span className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse" />
-            RESERVATION LIST
-          </h3>
-          <p className="text-[10px] text-gray-500 mt-1 font-mono">TOTAL: {sortedMembers.length} MEMBERS</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs md:text-sm font-bold text-white tracking-widest flex items-center gap-2">
+                <span className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse" />
+                RESERVATION LIST
+              </h3>
+              <p className="text-[10px] text-gray-500 mt-1 font-mono">TOTAL: {sortedMembers.length} MEMBERS</p>
+            </div>
+            <button
+              onClick={() => setShowGuide(true)}
+              className="px-3 py-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 hover:bg-yellow-500/20 text-xs font-black tracking-widest"
+            >
+              GUIDE
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 custom-scrollbar">
@@ -2665,6 +2721,7 @@ export const GamePlayTeamScreen = () => {
             const isGuest = String(member.id).startsWith('guest_');
             const isOffline = offlineUsers.has(member.id) && !isGuest;
             const challenge = member.challenge || { title: '...', criteria: '...' };
+            const roleLabel = member.role?.name || '—';
 
             return (
               <motion.div
@@ -2690,14 +2747,19 @@ export const GamePlayTeamScreen = () => {
                       {isGuest && <span className="text-[9px] bg-purple-600 text-white px-1.5 rounded font-bold">GUEST</span>}
                       {needsSelection(member) && <span className="text-[9px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-1.5 rounded font-bold">CHOOSE</span>}
                     </div>
+
+                    {/* ★ロール表示追加 */}
                     <div className="flex items-center gap-2 text-[10px] font-mono">
                       <span className={`font-bold ${member.team === 'A' ? 'text-cyan-300' : member.team === 'B' ? 'text-red-300' : 'text-gray-500'}`}>TEAM {member.team || '?'}</span>
                       <span className="text-gray-500">|</span>
+                      <span className="text-white/70 truncate">ROLE {roleLabel}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[10px] font-mono">
                       <span className="text-cyan-200">{(member.score || 0).toLocaleString()} pt</span>
+                      {isOffline && <span className="text-[9px] bg-red-900 text-red-300 px-1 rounded">OFFLINE</span>}
                     </div>
                   </div>
-
-                  {isOffline && <span className="ml-auto text-[9px] bg-red-900 text-red-300 px-1 rounded">OFFLINE</span>}
 
                   {canProxy(member) && (
                     <button onClick={() => setProxyTarget(member)} className="ml-auto px-3 py-1.5 rounded bg-yellow-400 text-black font-black text-[10px] animate-pulse border-2 border-yellow-200 shadow-[0_0_10px_yellow] hover:scale-110 transition-transform z-10 flex items-center gap-1">
