@@ -162,7 +162,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '✚',
     passive: '味方ターン開始時、チーム+150（歌唱結果に依存しない）。',
     skill: 'SKILL：(3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
-    ult: 'ULT：(1回) 指定した味方は「次のターン成功」になる',
+    ult: 'ULT：(1回) 指定した味方は次のターン成功になる',
   },
   {
     id: 'oracle',
@@ -171,7 +171,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '⟁',
     passive: '自分のターンはお題3択。',
     skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
-    ult: 'ULT：(1回) 次のターンの相手チームのお題を全員分引き直す（3択：1番目は現在のお題）',
+    ult: 'ULT：(1回) 次の相手チーム全員のお題を「ORACLE側が」3択から選んで確定（相手は選べない）',
   },
   {
     id: 'mimic',
@@ -198,7 +198,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '☒',
     passive: '自分成功で敵チーム-300。',
     skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をすべてリセットしパッシブ、スキル、ウルトを無効化',
+    ult: 'ULT：(1回) 次の敵チーム全員の「次の自分の番」1回分、特殊効果をリセットしパッシブ/スキル/ULTを無効化（味方は対象外）',
   },
   {
     id: 'underdog',
@@ -215,7 +215,7 @@ const ROLE_DEFS: RoleDef[] = [
     type: 'TEC',
     sigil: '🎲',
     passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（250刻み）。',
-    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル中はPASSIVEがマイナスでも0に止まる。',
+    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル使用時パッシブがマイナスなった場合でも0にとどまる。',
     ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
   },
 ];
@@ -335,8 +335,10 @@ const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B
   const t: TeamId = nextSinger.team;
   const et: TeamId = t === 'A' ? 'B' : 'A';
 
-  const sealed = (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
-  if (sealed) return plans; // パッシブ無効化中
+  // チーム封印中(SEALED)はチームパッシブ系も無効化
+  const sealedTeam = (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
+  const sealedPersonal = !!nextSinger?.debuffs?.sealedOnce;
+  if (sealedTeam || sealedPersonal) return plans;
 
   // coach passive
   if (mems.some((m) => m.team === t && m.role?.id === 'coach')) plans.push({ team: t, delta: 150, reason: 'COACH PASSIVE (+150 at ally turn start)' });
@@ -798,7 +800,8 @@ const GuideModal = ({
                     <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">{team !== '?' ? `TEAM ${team}` : 'TEAM ?'}</div>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+              
+    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                       <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">PASSIVE</div>
                       <div className="text-[12px] text-white/75 leading-relaxed">{def?.passive || '未選択 / ロール未決定'}</div>
@@ -863,6 +866,105 @@ const MissionDisplay = React.memo(({ title, criteria, stateText }: any) => {
 });
 
 // =========================
+// ORACLE ULT pick (ORACLE side chooses enemy themes)
+// =========================
+type OracleUltPickItem = {
+  targetId: string;
+  targetName: string;
+  team: TeamId;
+  choices: ThemeCard[];
+};
+
+type OracleUltPickState = null | {
+  active: true;
+  createdAt: number;
+  byId: string;
+  byName: string;
+  targetTeam: TeamId; // enemy team
+  idx: number; // current pick index
+  items: OracleUltPickItem[];
+};
+
+const OracleUltPickModal = ({
+  state,
+  busy,
+  canControl,
+  onClose,
+  onPick,
+}: {
+  state: OracleUltPickState;
+  busy: boolean;
+  canControl: boolean;
+  onClose: () => void;
+  onPick: (targetId: string, cand: ThemeCard) => void;
+}) => {
+  if (!state) return null;
+  const item = state.items?.[state.idx];
+  if (!item) return null;
+
+  return (
+    <div className="fixed inset-0 z-[245] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => !busy && onClose()} />
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="relative w-full max-w-5xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="rounded-xl p-6 md:p-8 bg-gradient-to-b from-white/5 to-black/40">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-mono tracking-widest text-yellow-300">ORACLE ULT</div>
+              <div className="text-2xl md:text-3xl font-black tracking-tight text-white mt-1">CHOOSE ENEMY THEME</div>
+              <div className="text-[11px] md:text-xs font-mono tracking-widest text-white/50 mt-1">
+                {state.byName} が選択中（敵は選択できません） / {state.idx + 1} / {state.items.length}
+              </div>
+            </div>
+            <button
+              disabled={busy}
+              onClick={onClose}
+              className="px-3 py-2 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 text-xs font-black tracking-widest"
+            >
+              CLOSE
+            </button>
+          </div>
+
+          <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-4">
+            <div className="text-[10px] font-mono tracking-widest text-white/40">TARGET</div>
+            <div className="text-white font-black mt-1">
+              {item.targetName} <span className="text-white/50 text-sm font-mono">/ TEAM {item.team}</span>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+            {item.choices.map((cand, i) => (
+              <button
+                key={`${item.targetId}-${i}-${cardTitle(cand)}`}
+                disabled={busy || !canControl}
+                onClick={() => onPick(item.targetId, cand)}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  busy || !canControl ? 'border-white/10 bg-black/20 opacity-60 cursor-not-allowed' : 'border-yellow-500/30 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-[1.01]'
+                }`}
+              >
+                <div className="text-[9px] font-mono tracking-widest text-yellow-200">OPTION {i + 1}</div>
+                <div className="mt-1 text-white font-black break-words">{cardTitle(cand)}</div>
+                <div className="mt-1 text-[11px] text-white/60 font-mono break-words">{cardCriteria(cand)}</div>
+              </button>
+            ))}
+          </div>
+
+          {!canControl && (
+            <div className="mt-4 text-[10px] font-mono tracking-widest text-red-300 border border-red-500/30 bg-red-500/10 px-3 py-2 rounded-xl">
+              YOU CANNOT CONTROL THIS ORACLE PICK
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+// =========================
 // Main Screen
 // =========================
 export const GamePlayTeamScreen = () => {
@@ -890,6 +992,9 @@ export const GamePlayTeamScreen = () => {
   const [turnSkillUsed, setTurnSkillUsed] = useState(false);
   const [turnUltUsed, setTurnUltUsed] = useState(false);
 
+  // ORACLE ULT pick state (room)
+  const [oracleUltPick, setOracleUltPick] = useState<OracleUltPickState>(null);
+
   // UI
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showLogsDrawer, setShowLogsDrawer] = useState(false);
@@ -903,7 +1008,6 @@ export const GamePlayTeamScreen = () => {
 
   // Selection confirmations
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-
 
   // Overlay (turn result)
   const [activeActionLog, setActiveActionLog] = useState<any>(null);
@@ -952,6 +1056,9 @@ export const GamePlayTeamScreen = () => {
 
       setLogs(data.logs || []);
       setLogEntries(Array.isArray(data.logEntries) ? data.logEntries : []);
+
+      // ORACLE ULT pick
+      setOracleUltPick((data.oracleUltPick as OracleUltPickState) || null);
 
       // backward compat: old boolean exists
       const compat = !!data.turnAbilityUsed;
@@ -1219,12 +1326,19 @@ export const GamePlayTeamScreen = () => {
   const canOperateAbility =
     currentSinger?.id === userId || (isHost && (isGuestTurn || (currentSinger && offlineUsers.has(currentSinger.id))));
 
-  const sealedThisTurnClient = useMemo(() => {
+  // team-sealed (legacy/team seal)
+  const sealedTeamThisTurnClient = useMemo(() => {
     const t = currentSinger?.team as TeamId | undefined;
     if (!t) return false;
     const tb = normalizeTeamBuffs(teamBuffs);
     return (tb?.[t]?.sealedTurns ?? 0) > 0;
   }, [teamBuffs, currentSinger?.team]);
+
+  // personal seal (saboteur ult)
+  const sealedPersonalThisTurnClient = !!currentSinger?.debuffs?.sealedOnce;
+
+  // unified sealed for buttons
+  const sealedThisTurnClient = sealedTeamThisTurnClient || sealedPersonalThisTurnClient;
 
   // ★ IMPORTANT: DBにultUsesが無い(古いデータ)でも、UI側はデフォルト値でボタンを押せるようにする
   const currentRoleId = (currentSinger?.role?.id as RoleId | undefined) || undefined;
@@ -1254,7 +1368,9 @@ export const GamePlayTeamScreen = () => {
   const selectionOwner = isHostOverrideSelecting ? currentSinger : myMember;
   const isSelectingMission = !!displayCandidates && displayCandidates.length > 0;
 
-  const isCurrentSingerLocked = !!currentSinger?.candidates && currentSinger.candidates.length > 0;
+  // ORACLE ULT pick blocks game flow until resolved
+  const isOraclePickingActive = !!oracleUltPick?.active;
+  const isCurrentSingerLocked = (!!currentSinger?.candidates && currentSinger.candidates.length > 0) || isOraclePickingActive;
 
   const currentChallenge = currentSinger?.challenge || { title: 'お題準備中...', criteria: '...' };
 
@@ -1275,6 +1391,8 @@ export const GamePlayTeamScreen = () => {
     addTeam('A');
     addTeam('B');
 
+    if (currentSinger?.debuffs?.sealedOnce) chips.push('SEALED (PERSONAL)');
+
     if (currentSinger?.role?.id === 'maestro' && (currentSinger.combo ?? 0) > 0) chips.push(`COMBO x${currentSinger.combo}`);
 
     if (turnSkillUsed) chips.push('SKILL USED');
@@ -1293,8 +1411,10 @@ export const GamePlayTeamScreen = () => {
     if (b.forcedSuccess) chips.push('FORCED SUCCESS');
     if (d.sabotaged) chips.push('SABOTAGED');
 
+    if (oracleUltPick?.active) chips.push('ORACLE PICKING (ULT)');
+
     return chips;
-  }, [teamBuffs, currentSinger, turnSkillUsed, turnUltUsed]);
+  }, [teamBuffs, currentSinger, turnSkillUsed, turnUltUsed, oracleUltPick]);
 
   // ===== Targets for ability modal =====
   const availableTargets = useMemo(() => {
@@ -1390,6 +1510,108 @@ export const GamePlayTeamScreen = () => {
     } finally {
       setBusy(false);
       if (isProxy) setProxyTarget(null);
+    }
+  };
+
+  // =========================
+  // ORACLE ULT pick confirm/apply
+  // =========================
+  const canControlOraclePick = useMemo(() => {
+    if (!oracleUltPick?.active) return false;
+    if (isHost) return true;
+    return oracleUltPick.byId === userId;
+  }, [oracleUltPick, userId, isHost]);
+
+  const requestPickOracleUltTheme = (targetId: string, cand: ThemeCard) => {
+    const item = oracleUltPick?.items?.find((x) => x.targetId === targetId);
+    const targetName = item?.targetName || 'ENEMY';
+
+    setConfirmState({
+      title: 'CONFIRM ORACLE ULT',
+      body: (
+        <div className="space-y-3">
+          <div className="text-white/80">
+            <span className="font-black">{targetName}</span> のお題をこれに確定しますか？
+          </div>
+          <div className="p-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10">
+            <div className="text-[10px] font-mono tracking-widest text-yellow-200">THEME</div>
+            <div className="text-white font-black mt-1">{cardTitle(cand)}</div>
+            <div className="text-[11px] text-white/60 font-mono mt-1">{cardCriteria(cand)}</div>
+          </div>
+        </div>
+      ),
+      confirmText: 'CONFIRM',
+      onConfirm: async () => {
+        setConfirmState(null);
+        await pickOracleUltThemeTx(targetId, cand);
+      },
+    });
+  };
+
+  const pickOracleUltThemeTx = async (targetId: string, cand: ThemeCard) => {
+    if (!roomId) return;
+    if (!oracleUltPick?.active) return;
+
+    setBusy(true);
+    try {
+      await runTransaction(db, async (tx) => {
+        const ref = doc(db, 'rooms', roomId);
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return;
+
+        const data: any = snap.data();
+        const state: OracleUltPickState = data.oracleUltPick || null;
+        if (!state?.active) return;
+
+        const controllerOk = isHost || state.byId === userId;
+        if (!controllerOk) return;
+
+        const item = state.items?.[state.idx];
+        if (!item) return;
+        if (item.targetId !== targetId) return;
+
+        const ok = (item.choices || []).some((x) => cardTitle(x) === cardTitle(cand) && cardCriteria(x) === cardCriteria(cand));
+        if (!ok) return;
+
+        const mems = (data.members || []).slice().sort(sortByTurn);
+        const mIdx = mems.findIndex((m: any) => m.id === targetId);
+        if (mIdx === -1) return;
+
+        const target = { ...mems[mIdx] };
+        target.challenge = cand;
+        target.candidates = null; // 念のため
+        mems[mIdx] = target;
+
+        const nextIdx = state.idx + 1;
+        const done = nextIdx >= (state.items?.length ?? 0);
+
+        const entry: LogEntry = {
+          ts: Date.now(),
+          kind: 'ULT',
+          actorName: state.byName,
+          actorId: state.byId,
+          team: target.team,
+          title: 'ORACLE ULT PICK',
+          lines: [
+            `TARGET: ${target.name} (TEAM ${target.team})`,
+            `THEME: ${cardTitle(cand)}`,
+            `COND: ${cardCriteria(cand)}`,
+            `PROGRESS: ${state.idx + 1}/${state.items.length}`,
+          ],
+        };
+
+        const newEntries = capEntries([...(Array.isArray(data.logEntries) ? data.logEntries : []), entry]);
+        const newLogs = capLogs([...(data.logs || []), `ORACLE ULT PICK: ${target.name} -> ${cardTitle(cand)}`]);
+
+        tx.update(ref, {
+          members: mems,
+          logEntries: newEntries,
+          logs: newLogs,
+          oracleUltPick: done ? null : { ...state, idx: nextIdx },
+        });
+      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1583,6 +1805,7 @@ export const GamePlayTeamScreen = () => {
   const requestUseSkill = () => {
     if (!currentSinger?.role) return;
     if (!canUseSkill) return;
+    if (oracleUltPick?.active) return; // ORACLE pick中はロック
 
     const rid: RoleId = currentSinger.role.id;
 
@@ -1615,6 +1838,7 @@ export const GamePlayTeamScreen = () => {
   const requestUseUlt = () => {
     if (!currentSinger?.role) return;
     if (!canUseUlt) return;
+    if (oracleUltPick?.active) return; // ORACLE pick中はロック
 
     const rid: RoleId = currentSinger.role.id;
 
@@ -1748,6 +1972,9 @@ export const GamePlayTeamScreen = () => {
 
         const data: any = snap.data();
 
+        // ORACLE pickが既に動いている間は新規発動不可（事故防止）
+        if (data.oracleUltPick?.active) return;
+
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
         const mems = (data.members || [])
@@ -1790,8 +2017,9 @@ export const GamePlayTeamScreen = () => {
           singer.id === userId || (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
         if (!canOperate) return;
 
-        // sealed: skill/ult disabled (only for singer's team)
+        // SEALED (team / personal): ability disabled
         if ((teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0) return;
+        if (singer.debuffs?.sealedOnce) return;
 
         // skill/ult turn lock
         const compat = !!data.turnAbilityUsed;
@@ -1936,27 +2164,35 @@ export const GamePlayTeamScreen = () => {
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
             pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
           } else if (r === 'saboteur') {
-            // ✅ FIX: 味方チームには影響しない / 敵チームだけを1ターンSEALED + 特殊効果リセット
-            const keepLast = teamBuffsTx?.[et]?.lastTeamDelta ?? 0;
-
-            // reset enemy team special effects, then seal for exactly 1 enemy-team turn
+            // ✅ FIX: 次の敵1人ではなく「敵全員の次の自分の番」1回分 SEALED
+            // - 敵チームの特殊効果をリセット（チームバフ）
+            // - 敵メンバー全員の buffs/debuffs をリセットし、debuffs.sealedOnce を付与（1回分）
             teamBuffsTx[et] = {
-              lastTeamDelta: keepLast,
-              sealedTurns: 1,
+              ...(teamBuffsTx[et] || {}),
+              lastTeamDelta: 0,
               nextSuccessBonus: 0,
               hypeUltTurns: 0,
               negHalfTurns: 0,
               negZeroTurns: 0,
+              sealedTurns: 0, // チーム封印は使わない（個人封印で全員に適用）
             };
 
-            // reset enemy members' local effects
+            const affected: string[] = [];
             for (let i = 0; i < mems.length; i++) {
               if (mems[i]?.team === et) {
-                mems[i] = { ...mems[i], buffs: {}, debuffs: {} };
+                const name = mems[i]?.name;
+                mems[i] = {
+                  ...mems[i],
+                  buffs: {},
+                  debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } }, // 次の自分のターン1回分
+                };
+                if (name) affected.push(name);
               }
             }
 
-            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects RESET + SEALED for 1 team-turn (passive/skill/ult disabled)`);
+            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects RESET`);
+            pushLines.push(`ULT SABOTEUR: SEALED (PERSONAL) applied to ALL enemies for their next personal turn`);
+            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
           } else if (r === 'underdog') {
             const my = teamScoresTx[t] ?? 0;
             const opp = teamScoresTx[et] ?? 0;
@@ -1974,27 +2210,43 @@ export const GamePlayTeamScreen = () => {
             singer.buffs.gamblerUlt = true;
             pushLines.push(`ULT GAMBLER: coinflip armed (+5000 / -1000)`);
           } else if (r === 'oracle') {
-            // ✅ ORACLE ULT: enemy team ALL reroll (3 choices, option1=current)
-            const affected: string[] = [];
-            for (let i = 0; i < mems.length; i++) {
-              const m = mems[i];
-              if (!isReadyForTurn(m)) continue;
-              if (m.team !== et) continue;
+            // ✅ FIX: 敵に3択を渡すのはNG -> ORACLE側が敵全員分「自分で選択して確定」する
+            const enemyReady = mems.filter((m: any) => isReadyForTurn(m) && m.team === et);
+            const items: OracleUltPickItem[] = [];
 
-              const target = { ...m };
-              const res = rerollThreeChoicesKeepFirst(target, deck, pool);
-              deck = res.nextDeck;
+            for (const em of enemyReady) {
+              const cur = em.challenge ?? { title: 'FREE THEME', criteria: '—' };
+              const d2 = drawFromDeck<ThemeCard>(deck, pool, 2);
+              deck = d2.nextDeck;
               deckChanged = true;
 
-              target.candidates = res.choices;
-              target.challenge = res.current;
-
-              mems[i] = target;
-              affected.push(target.name);
+              const extra = d2.choices || [];
+              const choices: ThemeCard[] = [cur, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
+              items.push({ targetId: em.id, targetName: em.name, team: em.team, choices });
             }
 
-            pushLines.push(`ULT ORACLE: reroll TEAM ${et} themes for ALL members (opt1=current)`);
-            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
+            if (items.length === 0) {
+              pushLines.push(`ULT ORACLE: no enemy targets`);
+            } else {
+              pushLines.push(`ULT ORACLE: choose themes for ALL enemies (enemy cannot choose)`);
+              pushLines.push(`TARGETS: ${items.map((x) => x.targetName).join(', ')}`);
+            }
+
+            // room state: oracleUltPick
+            const oraclePickState: OracleUltPickState =
+              items.length > 0
+                ? {
+                    active: true,
+                    createdAt: Date.now(),
+                    byId: singer.id,
+                    byName: singer.name,
+                    targetTeam: et,
+                    idx: 0,
+                    items,
+                  }
+                : null;
+            // set into update later
+            (data as any).__oraclePickState = oraclePickState;
           }
         }
 
@@ -2019,14 +2271,17 @@ export const GamePlayTeamScreen = () => {
             const target = { ...mems[targetIdx] };
             if (target.team !== t) return;
 
-            const res = rerollThreeChoicesKeepFirst(target, deck, pool);
-            deck = res.nextDeck;
+            const current = target.challenge ?? { title: 'FREE THEME', criteria: '—' };
+            const d2 = drawFromDeck<ThemeCard>(deck, pool, 2);
+            deck = d2.nextDeck;
             deckChanged = true;
+            const extra = d2.choices || [];
+            const choices: ThemeCard[] = [current, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
 
-            target.candidates = res.choices;
-            target.challenge = res.current;
-
+            target.candidates = choices;
+            target.challenge = current;
             mems[targetIdx] = target;
+
             pushLines.push(`MIMIC ULT: stole ORACLE SKILL -> REROLL for ${target.name} (opt1=current)`);
           } else if (stolen === 'hype') {
             const targetId = opts.targetId;
@@ -2104,6 +2359,12 @@ export const GamePlayTeamScreen = () => {
           logs: newLogs,
           logEntries: newEntries,
         };
+
+        // ORACLE ULT pick state attach
+        if ((data as any).__oraclePickState !== undefined) {
+          updateObj.oracleUltPick = (data as any).__oraclePickState;
+        }
+
         if (deckChanged) updateObj.deck = deck;
 
         tx.update(ref, updateObj);
@@ -2129,6 +2390,9 @@ export const GamePlayTeamScreen = () => {
         if (!snap.exists()) return;
 
         const data: any = snap.data();
+
+        // ORACLE pick中はターン進行禁止
+        if (data.oracleUltPick?.active) return;
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
@@ -2176,8 +2440,10 @@ export const GamePlayTeamScreen = () => {
 
         const serial = data.turnSerial ?? 0;
 
-        // Seal check (disable passive/skill/ult effects this turn) — only singer team
-        const sealedThisTurn = (teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0;
+        // Seal check (disable passive/skill/ult effects this turn)
+        const sealedTeamThisTurn = (teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0;
+        const sealedPersonalThisTurn = !!singer.debuffs?.sealedOnce;
+        const sealedThisTurn = sealedTeamThisTurn || sealedPersonalThisTurn;
 
         // Neg mitigation check for this team turn (from IRONWALL SKILL/ULT)
         const negZeroActive = (teamBuffsTx?.[t]?.negZeroTurns ?? 0) > 0;
@@ -2369,7 +2635,7 @@ export const GamePlayTeamScreen = () => {
             if (singer.buffs?.gamblerSkillClampPassive) singer.buffs.gamblerSkillClampPassive = false;
           }
 
-          // GAMBLER ult coinflip  ★成功時 +5000 に変更
+          // GAMBLER ult coinflip
           if (singer.buffs?.gamblerUlt) {
             const head = Math.random() < 0.5;
             const delta = head ? 5000 : -1000;
@@ -2416,9 +2682,16 @@ export const GamePlayTeamScreen = () => {
         const lastTurnDelta = singerTurnDelta;
 
         // Decrement sealed/neg buffs if active on this team's turn
-        if (sealedThisTurn) teamBuffsTx[t].sealedTurns = Math.max(0, (teamBuffsTx[t].sealedTurns ?? 0) - 1);
+        if (sealedTeamThisTurn) teamBuffsTx[t].sealedTurns = Math.max(0, (teamBuffsTx[t].sealedTurns ?? 0) - 1);
         if (negZeroActive) teamBuffsTx[t].negZeroTurns = Math.max(0, (teamBuffsTx[t].negZeroTurns ?? 0) - 1);
         else if (negHalfActive) teamBuffsTx[t].negHalfTurns = Math.max(0, (teamBuffsTx[t].negHalfTurns ?? 0) - 1);
+
+        // ✅ personal sealed is consumed after this player's turn
+        if (sealedPersonalThisTurn) {
+          singer.debuffs = { ...(singer.debuffs || {}) };
+          delete singer.debuffs.sealedOnce;
+          notes.push('NOTE SEALED (PERSONAL): consumed and cleared');
+        }
 
         // Next singer & deal mission
         const pool = normalizeThemePool(data.themePool);
@@ -2545,6 +2818,7 @@ export const GamePlayTeamScreen = () => {
       turnSkillUsed: false,
       turnUltUsed: false,
       turnAbilityUsed: false,
+      oracleUltPick: null,
     });
 
     navigate('/team-result');
@@ -2610,6 +2884,18 @@ export const GamePlayTeamScreen = () => {
         }}
       />
 
+      {/* ORACLE ULT pick modal */}
+      <OracleUltPickModal
+        state={oracleUltPick}
+        busy={busy}
+        canControl={canControlOraclePick}
+        onClose={() => {
+          // close only (does not cancel state in DB)
+          addToast('ORACLE PICK は未完了です（続けて選択してください）');
+        }}
+        onPick={(targetId, cand) => requestPickOracleUltTheme(targetId, cand)}
+      />
+
       {/* PROXY modal */}
       <AnimatePresence>
         {proxyTarget && (
@@ -2629,7 +2915,7 @@ export const GamePlayTeamScreen = () => {
                       whileHover={{ scale: 1.05, borderColor: '#facc15' }}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => requestPickCandidate(proxyTarget.id, cand, true)}
-                      disabled={busy}
+                      disabled={busy || isOraclePickingActive}
                       className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
                     >
                       <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
@@ -2851,7 +3137,7 @@ export const GamePlayTeamScreen = () => {
                         whileHover={{ scale: 1.05, borderColor: '#facc15' }}
                         whileTap={{ scale: 0.95 }}
                         onClick={() => requestPickCandidate(selectionOwner.id, cand, false)}
-                        disabled={busy}
+                        disabled={busy || isOraclePickingActive}
                         className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
                       >
                         <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
@@ -2863,7 +3149,12 @@ export const GamePlayTeamScreen = () => {
                 </div>
               </motion.div>
             ) : (
-              <MissionDisplay key={(currentSinger?.id || 'none') + turnSerial} title={cardTitle(currentChallenge)} criteria={cardCriteria(currentChallenge)} stateText={isCurrentSingerLocked ? 'CHOOSING THEME...' : null} />
+              <MissionDisplay
+                key={(currentSinger?.id || 'none') + turnSerial}
+                title={cardTitle(currentChallenge)}
+                criteria={cardCriteria(currentChallenge)}
+                stateText={isCurrentSingerLocked ? (oracleUltPick?.active ? 'ORACLE SELECTING...' : 'CHOOSING THEME...') : null}
+              />
             )}
           </AnimatePresence>
         </div>
@@ -2899,10 +3190,10 @@ export const GamePlayTeamScreen = () => {
               <div className="text-[8px] md:text-[10px] font-mono tracking-widest text-white/40">ABILITIES</div>
 
               <button
-                disabled={!canUseSkill || busy || !!activeActionLog}
+                disabled={!canUseSkill || busy || !!activeActionLog || isOraclePickingActive}
                 onClick={requestUseSkill}
                 className={`w-full py-2 rounded-xl font-black tracking-widest text-xs transition-all ${
-                  canUseSkill && !busy && !activeActionLog
+                  canUseSkill && !busy && !activeActionLog && !isOraclePickingActive
                     ? 'bg-gradient-to-r from-cyan-700 to-blue-700 hover:scale-[1.02]'
                     : 'bg-white/5 border border-white/10 text-white/30 cursor-not-allowed'
                 }`}
@@ -2911,10 +3202,10 @@ export const GamePlayTeamScreen = () => {
               </button>
 
               <button
-                disabled={!canUseUlt || busy || !!activeActionLog}
+                disabled={!canUseUlt || busy || !!activeActionLog || isOraclePickingActive}
                 onClick={requestUseUlt}
                 className={`w-full py-2 rounded-xl font-black tracking-widest text-xs transition-all ${
-                  canUseUlt && !busy && !activeActionLog
+                  canUseUlt && !busy && !activeActionLog && !isOraclePickingActive
                     ? 'bg-gradient-to-r from-yellow-600 to-orange-700 hover:scale-[1.02]'
                     : 'bg-white/5 border border-white/10 text-white/30 cursor-not-allowed'
                 }`}
@@ -2925,6 +3216,11 @@ export const GamePlayTeamScreen = () => {
               {sealedThisTurnClient && (
                 <div className="text-[9px] font-mono tracking-widest text-red-300 border border-red-500/30 bg-red-500/10 rounded-lg px-2 py-1">
                   SEALED: PASSIVE/SKILL/ULT DISABLED
+                </div>
+              )}
+              {isOraclePickingActive && (
+                <div className="text-[9px] font-mono tracking-widest text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 rounded-lg px-2 py-1">
+                  ORACLE ULT: PICKING IN PROGRESS
                 </div>
               )}
             </div>
@@ -2986,12 +3282,19 @@ export const GamePlayTeamScreen = () => {
                     </div>
                   )}
 
+                  {member.debuffs?.sealedOnce && (
+                    <div className="mt-1 text-[7px] font-bold text-red-300 border border-red-500/30 bg-red-500/10 px-2 py-0.5 rounded-full w-fit">
+                      SEALED
+                    </div>
+                  )}
+
                   {isOffline && <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-[8px] text-red-500 font-bold backdrop-blur-[1px]">OFFLINE</div>}
 
                   {canProxy(member) && (
                     <button
                       onClick={() => setProxyTarget(member)}
                       className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm z-10 border-2 border-yellow-400 animate-pulse text-yellow-400 hover:bg-yellow-400 hover:text-black transition-colors"
+                      disabled={isOraclePickingActive}
                     >
                       <span className="text-xl">⚡</span>
                       <span className="text-[8px] font-black tracking-tighter">PROXY</span>
@@ -3054,6 +3357,7 @@ export const GamePlayTeamScreen = () => {
                       <span className={`font-bold text-sm truncate ${isCurrent ? 'text-white' : 'text-gray-300'}`}>{member.name}</span>
                       {isGuest && <span className="text-[9px] bg-purple-600 text-white px-1.5 rounded font-bold">GUEST</span>}
                       {needsSelection(member) && <span className="text-[9px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-1.5 rounded font-bold">CHOOSE</span>}
+                      {member.debuffs?.sealedOnce && <span className="text-[9px] bg-red-500/20 text-red-200 border border-red-500/30 px-1.5 rounded font-bold">SEALED</span>}
                     </div>
 
                     <div className="flex items-center gap-2 text-[10px] font-mono">
@@ -3069,7 +3373,11 @@ export const GamePlayTeamScreen = () => {
                   </div>
 
                   {canProxy(member) && (
-                    <button onClick={() => setProxyTarget(member)} className="ml-auto px-3 py-1.5 rounded bg-yellow-400 text-black font-black text-[10px] animate-pulse border-2 border-yellow-200 shadow-[0_0_10px_yellow] hover:scale-110 transition-transform z-10 flex items-center gap-1">
+                    <button
+                      onClick={() => setProxyTarget(member)}
+                      disabled={isOraclePickingActive}
+                      className="ml-auto px-3 py-1.5 rounded bg-yellow-400 text-black font-black text-[10px] animate-pulse border-2 border-yellow-200 shadow-[0_0_10px_yellow] hover:scale-110 transition-transform z-10 flex items-center gap-1 disabled:opacity-50"
+                    >
                       ⚡ PROXY
                     </button>
                   )}
