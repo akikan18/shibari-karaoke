@@ -18,7 +18,7 @@ const BASE_SUCCESS = 1000;
 const BASE_FAIL = 0;
 
 const MAX_LOGS = 80;
-const MAX_LOG_ENTRIES = 160;
+const MAX_LOG_ENTRIES = 220;
 
 // 100刻み丸め
 const roundToStep = (v: number, step = 100) => Math.round(v / step) * step;
@@ -135,7 +135,7 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'THE MAESTRO',
     type: 'ATK',
     sigil: '⬢',
-    // ★変更：失敗時は「コンボ消滅だけ」
+    // ★失敗時はコンボ消滅だけ
     passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
     skill: 'SKILL: (3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
     ult: 'ULT: (1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
@@ -154,7 +154,7 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'IRON WALL',
     type: 'DEF',
     sigil: '▣',
-    passive: 'チームが受ける「マイナス効果」を30%軽減（失敗0は対象外）。',
+    passive: 'チームが受ける「チームへのマイナス効果」を30%軽減（歌唱の失敗0は対象外）。',
     skill: 'SKILL: (3回) INTERCEPT：指定味方の次マイナスを0。代わりに自分が半分受ける。',
     ult: 'ULT: (1回) BARRIER：次に自分の番が来るまで、チームへのマイナス効果を無効化。',
   },
@@ -239,6 +239,21 @@ type LogEntry = {
   lines: string[];
 };
 
+type ScoreScope = 'PLAYER' | 'TEAM';
+type ScoreChange = {
+  scope: ScoreScope;
+  target: string;
+  from: number;
+  to: number;
+  delta: number;
+  reason: string;
+};
+
+const fmtChangeLine = (c: ScoreChange) => {
+  const arrow = '→';
+  return `${c.scope} ${c.target}: ${c.from.toLocaleString()} ${arrow} ${c.to.toLocaleString()} (${fmt(c.delta)}) [${c.reason}]`;
+};
+
 const iconOf = (k: LogKind) => {
   if (k === 'RESULT') return '🎤';
   if (k === 'SKILL') return '✨';
@@ -297,26 +312,27 @@ const findFirstReadyIndex = (mems: any[]) => {
 };
 
 // =========================
-// Start-of-turn Auras
+// Turn Start Auras (detailed)
 // =========================
-const computeStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }) => {
-  const t: TeamId = nextSinger?.team;
+type AuraPlan = { team: TeamId; delta: number; reason: string };
+
+const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }) => {
+  const plans: AuraPlan[] = [];
+  if (!nextSinger?.team) return plans;
+
+  const t: TeamId = nextSinger.team;
   const et: TeamId = t === 'A' ? 'B' : 'A';
-  let add = 0;
 
   // coach passive
-  if (mems.some((m) => m.team === t && m.role?.id === 'coach')) add += 150;
+  if (mems.some((m) => m.team === t && m.role?.id === 'coach')) plans.push({ team: t, delta: 150, reason: 'COACH PASSIVE (+150 at ally turn start)' });
   // hype passive
-  if (nextSinger?.role?.id === 'hype') add += 400;
+  if (nextSinger?.role?.id === 'hype') plans.push({ team: t, delta: 400, reason: 'HYPE PASSIVE (+400 at self turn start)' });
   // underdog passive
   if (nextSinger?.role?.id === 'underdog') {
-    if ((teamScores[t] ?? 0) < (teamScores[et] ?? 0)) add += 500;
+    if ((teamScores[t] ?? 0) < (teamScores[et] ?? 0)) plans.push({ team: t, delta: 500, reason: 'UNDERDOG PASSIVE (+500 when losing at self turn start)' });
   }
 
-  if (add !== 0) {
-    return { teamScores: { ...teamScores, [t]: (teamScores[t] ?? 0) + add }, auraAdd: add };
-  }
-  return { teamScores, auraAdd: 0 };
+  return plans;
 };
 
 // =========================
@@ -356,10 +372,7 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
         <div className="absolute inset-0 opacity-50" style={{ background: `radial-gradient(circle at 50% 50%, ${headlineColor}22, transparent 60%)` }} />
 
         <div className="text-[10px] md:text-xs font-mono tracking-[0.4em] text-white/60">TURN RESULT</div>
-        <h2
-          className="text-2xl md:text-5xl font-black italic tracking-widest px-4 text-center mb-3"
-          style={{ color: headlineColor, textShadow: `0 0 18px ${headlineColor}66` }}
-        >
+        <h2 className="text-2xl md:text-5xl font-black italic tracking-widest px-4 text-center mb-3" style={{ color: headlineColor, textShadow: `0 0 18px ${headlineColor}66` }}>
           {actionLog.title}
         </h2>
 
@@ -367,7 +380,8 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
           {limited.map((line: string, idx: number) => {
             const isNegative = line.includes('-');
             const isTeam = line.startsWith('TEAM ');
-            const isNote = line.startsWith('NOTE ');
+            const isPlayer = line.startsWith('PLAYER ');
+            const isNote = line.startsWith('NOTE ') || line.startsWith('THEME ');
             const isAbility = line.startsWith('SKILL ') || line.startsWith('ULT ') || line.startsWith('BLACKOUT') || line.startsWith('SABOTAGE');
 
             const colorClasses =
@@ -379,6 +393,8 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
                 ? 'text-red-400 border-red-500/30 bg-red-900/20'
                 : isTeam
                 ? 'text-cyan-300 border-cyan-500/30 bg-cyan-900/20'
+                : isPlayer
+                ? 'text-emerald-200 border-emerald-500/30 bg-emerald-900/15'
                 : 'text-white border-white/10 bg-black/30';
 
             return (
@@ -739,9 +755,7 @@ const GuideModal = ({
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xl md:text-2xl font-black tracking-widest text-cyan-200">GUIDE</div>
-              <div className="text-[11px] font-mono tracking-widest text-white/50 mt-1">
-                参加メンバーのロール説明（途中参加・ゲスト・オフライン含む）
-              </div>
+              <div className="text-[11px] font-mono tracking-widest text-white/50 mt-1">参加メンバーのロール説明（途中参加・ゲスト・オフライン含む）</div>
             </div>
             <button onClick={onClose} className="w-10 h-10 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center">
               ✕
@@ -775,9 +789,7 @@ const GuideModal = ({
                         {usedBadge && <span className="ml-2 text-[9px] px-2 py-0.5 rounded bg-white/5 border border-white/10">IN USE</span>}
                       </div>
                     </div>
-                    <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">
-                      {team !== '?' ? `TEAM ${team}` : 'TEAM ?'}
-                    </div>
+                    <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">{team !== '?' ? `TEAM ${team}` : 'TEAM ?'}</div>
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -873,7 +885,7 @@ export const GamePlayTeamScreen = () => {
   // UI
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showLogsDrawer, setShowLogsDrawer] = useState(false);
-  const [showGuide, setShowGuide] = useState(false); // ★ガイド復帰
+  const [showGuide, setShowGuide] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [targetModal, setTargetModal] = useState<TargetModalState>(null);
@@ -909,7 +921,8 @@ export const GamePlayTeamScreen = () => {
     setUserId(ui.userId);
     setIsHost(!!ui.isHost);
 
-    const unsub = onSnapshot(doc(db, 'rooms', ui.roomId), (snap) => {
+   
+ const unsub = onSnapshot(doc(db, 'rooms', ui.roomId), (snap) => {
       if (!snap.exists()) {
         navigate('/');
         return;
@@ -965,7 +978,6 @@ export const GamePlayTeamScreen = () => {
   }, [sortedMembers, safeIndex]);
   const nextSinger = sortedMembers[nextSingerIndex] || null;
 
-  // Host missing leave
   const handleForceLeave = async () => {
     try {
       if (!roomId || !userId) {
@@ -1062,7 +1074,6 @@ export const GamePlayTeamScreen = () => {
 
         let mems = (data.members || []).slice().sort(sortByTurn);
 
-        // defaults
         mems = mems.map((m: any) => ({
           ...m,
           score: m.score ?? 0,
@@ -1080,7 +1091,6 @@ export const GamePlayTeamScreen = () => {
             : null,
         }));
 
-        // assign turnOrder if missing
         let maxOrder = mems.reduce((mx: number, m: any) => (typeof m.turnOrder === 'number' ? Math.max(mx, m.turnOrder) : mx), -1);
         let changed = false;
         mems = mems.map((m: any) => {
@@ -1092,11 +1102,9 @@ export const GamePlayTeamScreen = () => {
           return m;
         });
 
-        // theme pool & deck
         const pool = normalizeThemePool(data.themePool);
         let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
 
-        // deal challenge for ready members missing it
         for (let i = 0; i < mems.length; i++) {
           const m = mems[i];
           if (!isReadyForTurn(m)) continue;
@@ -1115,7 +1123,6 @@ export const GamePlayTeamScreen = () => {
           changed = true;
         }
 
-        // currentTurnIndex must point to ready member
         let idx = data.currentTurnIndex ?? 0;
         if (idx >= mems.length) {
           idx = 0;
@@ -1176,7 +1183,7 @@ export const GamePlayTeamScreen = () => {
   const canUseSkill = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.skillUses ?? 0) > 0;
   const canUseUlt = !!currentSinger && !!currentSinger.role && canOperateAbility && !turnAbilityUsed && (currentSinger.role.ultUses ?? 0) > 0;
 
-  // candidates selection UI (oracle etc)
+  // candidates selection UI
   const isHostOverrideSelecting = isHost && currentSinger?.candidates?.length > 0 && currentSinger?.id !== userId;
   const displayCandidates: ThemeCard[] | null = isHostOverrideSelecting ? currentSinger.candidates : myMember?.candidates || null;
   const selectionOwner = isHostOverrideSelecting ? currentSinger : myMember;
@@ -1455,7 +1462,6 @@ export const GamePlayTeamScreen = () => {
         const idx = mems.findIndex((m: any) => m.id === userId);
         if (idx === -1) return;
 
-        // role duplication guard
         const used = new Set<RoleId>();
         for (const m of mems) {
           if (m.id === userId) continue;
@@ -1578,12 +1584,17 @@ export const GamePlayTeamScreen = () => {
     const def = roleDef(rid);
 
     const actionText =
-      action === 'ironwall_intercept' ? 'INTERCEPT'
-      : action === 'coach_timeout' ? 'TIMEOUT'
-      : action === 'saboteur_sabotage' ? 'SABOTAGE'
-      : action === 'oracle_reroll' ? 'REROLL'
-      : action === 'hype_boost' ? 'HYPE BOOST'
-      : 'STEAL ROLE';
+      action === 'ironwall_intercept'
+        ? 'INTERCEPT'
+        : action === 'coach_timeout'
+        ? 'TIMEOUT'
+        : action === 'saboteur_sabotage'
+        ? 'SABOTAGE'
+        : action === 'oracle_reroll'
+        ? 'REROLL'
+        : action === 'hype_boost'
+        ? 'HYPE BOOST'
+        : 'STEAL ROLE';
 
     setConfirmState({
       title,
@@ -1666,6 +1677,19 @@ export const GamePlayTeamScreen = () => {
 
         const kind = opts.kind;
 
+        // score helpers (detailed)
+        const scoreChanges: ScoreChange[] = [];
+        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
+        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
+        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
+
+        const recordTeam = (team: TeamId, delta: number, reason: string) => {
+          const from = teamScoresTx[team] ?? 0;
+          const to = from + delta;
+          teamScoresTx = { ...teamScoresTx, [team]: to };
+          scoreChanges.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta, reason });
+        };
+
         if (kind === 'skill') {
           if ((singer.role.skillUses ?? 0) <= 0) return;
           singer.role.skillUses -= 1;
@@ -1677,8 +1701,6 @@ export const GamePlayTeamScreen = () => {
         const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
-
-        let teamScoresTx = data.teamScores || computeTeamScores(mems);
 
         const pushLines: string[] = [];
         const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
@@ -1697,11 +1719,8 @@ export const GamePlayTeamScreen = () => {
           } else if (r === 'underdog') {
             const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
             const steal = clamp(roundToStep(diff * 0.2, 100), 0, 2000);
-            teamScoresTx = {
-              ...teamScoresTx,
-              [t]: (teamScoresTx[t] ?? 0) + steal,
-              [et]: (teamScoresTx[et] ?? 0) - steal,
-            };
+            recordTeam(t, +steal, `UNDERDOG SKILL (steal 20% up to 2000)`);
+            recordTeam(et, -steal, `UNDERDOG SKILL (stolen by TEAM ${t})`);
             pushLines.push(`SKILL UNDERDOG: steal ${steal} from TEAM ${et}`);
           } else if (r === 'hype') {
             const targetId = opts.targetId;
@@ -1771,7 +1790,7 @@ export const GamePlayTeamScreen = () => {
           if (r === 'maestro') {
             const combo = singer.combo ?? 0;
             const gain = combo * 800;
-            teamScoresTx = { ...teamScoresTx, [t]: (teamScoresTx[t] ?? 0) + gain };
+            recordTeam(t, gain, `MAESTRO ULT (FINALE: combo x800)`);
             singer.combo = 0;
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 500 };
             pushLines.push(`ULT MAESTRO: FINALE team +${gain}, next success +500`);
@@ -1785,7 +1804,7 @@ export const GamePlayTeamScreen = () => {
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), barrierUntil: expire, barrierOwner: singer.id };
             pushLines.push(`ULT IRONWALL: BARRIER active`);
           } else if (r === 'coach') {
-            teamScoresTx = { ...teamScoresTx, [t]: (teamScoresTx[t] ?? 0) + 2500 };
+            recordTeam(t, 2500, `COACH ULT (MORALE +2500)`);
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), blackoutTurns: 0 };
             pushLines.push(`ULT COACH: MORALE team +2500 (cleanse light debuffs)`);
           } else if (r === 'oracle') {
@@ -1805,7 +1824,7 @@ export const GamePlayTeamScreen = () => {
           } else if (r === 'underdog') {
             const losing = (teamScoresTx[t] ?? 0) < (teamScoresTx[et] ?? 0);
             if (!losing) return;
-            teamScoresTx = { ...teamScoresTx, [t]: (teamScoresTx[t] ?? 0) + 2000 };
+            recordTeam(t, 2000, `UNDERDOG ULT (+2000 when losing)`);
             singer.buffs.clutchDebt = true;
             pushLines.push(`ULT UNDERDOG: team +2000 (if fail -500 this turn)`);
           } else if (r === 'gambler') {
@@ -1823,6 +1842,8 @@ export const GamePlayTeamScreen = () => {
           title: pushLines[0] || undefined,
         };
 
+        const changeLines = scoreChanges.map(fmtChangeLine);
+
         const entry: LogEntry = {
           ts: Date.now(),
           kind: kind === 'ult' ? 'ULT' : 'SKILL',
@@ -1830,7 +1851,11 @@ export const GamePlayTeamScreen = () => {
           actorId: singer.id,
           team: singer.team,
           title: `${kind === 'ult' ? 'ULT' : 'SKILL'} ACTIVATED`,
-          lines: [singer.role?.name || 'ROLE', ...pushLines],
+          lines: [
+            `ROLE: ${singer.role?.name || 'ROLE'}`,
+            ...pushLines.map((x) => `NOTE ${x}`),
+            ...(changeLines.length ? ['— SCORE CHANGES —', ...changeLines] : []),
+          ],
         };
 
         const newLogs = capLogs([...(data.logs || []), ...pushLines.map((x) => `ABILITY: ${x}`)]);
@@ -1891,243 +1916,270 @@ export const GamePlayTeamScreen = () => {
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
 
-        let teamScoresTx = data.teamScores || computeTeamScores(mems);
+        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
+        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
+        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
+
         const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
+        const serial = data.turnSerial ?? 0;
 
-        let selfDelta = isSuccess ? BASE_SUCCESS : BASE_FAIL;
-        let teamDelta = 0;
-        let enemyTeamDelta = 0;
+        // -------------------------
+        // detailed score tracking
+        // -------------------------
+        const changes: ScoreChange[] = [];
+        const notes: string[] = [];
 
-        const logLines: string[] = [];
+        const hasBarrier = (team: TeamId) => (teamBuffsTx?.[team]?.barrierUntil ?? -1) > serial;
+        const hasIronwall = (team: TeamId) => mems.some((m: any) => m.team === team && m.role?.id === 'ironwall');
 
-        // BLACKOUT
-        if ((teamBuffsTx[t]?.blackoutTurns ?? 0) > 0) {
-          selfDelta -= 2000;
-          teamBuffsTx[t].blackoutTurns = Math.max(0, (teamBuffsTx[t].blackoutTurns ?? 0) - 1);
-          logLines.push(`BLACKOUT: ${singer.name} -2000`);
-        }
+        const applyTeamDeltaWithMitigation = (team: TeamId, delta: number, reason: string) => {
+          if (delta === 0) return;
 
+          let finalDelta = delta;
+
+          if (finalDelta < 0) {
+            if (hasBarrier(team)) {
+              notes.push(`NOTE TEAM ${team}: BARRIER blocked negative effect (${fmt(finalDelta)}) [${reason}]`);
+              finalDelta = 0;
+            } else if (hasIronwall(team)) {
+              const reduced = roundToStep(finalDelta * 0.7, 100);
+              notes.push(`NOTE TEAM ${team}: IRONWALL reduced (${fmt(finalDelta)} -> ${fmt(reduced)}) [${reason}]`);
+              finalDelta = reduced;
+            }
+          }
+
+          if (finalDelta === 0) return;
+
+          const from = teamScoresTx[team] ?? 0;
+          const to = from + finalDelta;
+          teamScoresTx = { ...teamScoresTx, [team]: to };
+          changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta: finalDelta, reason });
+        };
+
+        let singerTurnDelta = 0; // singer's net delta applied to score/team
+
+        const applySingerDelta = (delta: number, reason: string) => {
+          if (delta === 0) return;
+          const fromP = singer.score ?? 0;
+          const toP = fromP + delta;
+          singer.score = toP;
+          singerTurnDelta += delta;
+          changes.push({ scope: 'PLAYER', target: singer.name, from: fromP, to: toP, delta, reason });
+
+          // Team follows singer delta (since team points are sum of member deltas)
+          const fromT = teamScoresTx[t] ?? 0;
+          const toT = fromT + delta;
+          teamScoresTx = { ...teamScoresTx, [t]: toT };
+          changes.push({ scope: 'TEAM', target: `TEAM ${t}`, from: fromT, to: toT, delta, reason: `${reason} (by ${singer.name})` });
+        };
+
+        const applyOtherPlayerDelta = (member: any, delta: number, reason: string) => {
+          if (!member || delta === 0) return;
+          const team: TeamId = member.team;
+          const fromP = member.score ?? 0;
+          const toP = fromP + delta;
+          member.score = toP;
+          changes.push({ scope: 'PLAYER', target: member.name, from: fromP, to: toP, delta, reason });
+
+          const fromT = teamScoresTx[team] ?? 0;
+          const toT = fromT + delta;
+          teamScoresTx = { ...teamScoresTx, [team]: toT };
+          changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from: fromT, to: toT, delta, reason: `${reason} (by ${member.name})` });
+        };
+
+        // -------------------------
+        // Base / sabotage
+        // -------------------------
         const rid: RoleId | undefined = singer.role?.id;
-
-        // SABOTEUR SKILL debuff
         const sabotage = singer.debuffs?.sabotaged;
-        if (sabotage) {
-          logLines.push(`SABOTAGE ACTIVE`);
+        const sabotageActive = !!sabotage;
+
+        // 1) base singing score (overridden if sabotaged)
+        if (sabotageActive) {
+          const forced = isSuccess ? 0 : -800;
+          applySingerDelta(forced, `SABOTEUR SKILL (SABOTAGE OVERRIDE: ${isSuccess ? '+0 on success' : '-800 on fail'})`);
+          singer.debuffs.sabotaged = null;
+          notes.push(`NOTE SABOTAGE: other bonus sources are suppressed for this turn`);
+        } else {
+          const base = isSuccess ? BASE_SUCCESS : BASE_FAIL;
+          applySingerDelta(base, isSuccess ? 'BASE SUCCESS' : 'BASE FAIL');
         }
 
-        // showman passive
-        if (rid === 'showman' && isSuccess) selfDelta += 500;
+        // 2) BLACKOUT (team debuff applied to singer turn)
+        if ((teamBuffsTx[t]?.blackoutTurns ?? 0) > 0) {
+          applySingerDelta(-2000, 'SABOTEUR ULT (BLACKOUT: -2000)');
+          teamBuffsTx[t].blackoutTurns = Math.max(0, (teamBuffsTx[t].blackoutTurns ?? 0) - 1);
+        }
 
-        // saboteur passive
-        if (rid === 'saboteur' && isSuccess) enemyTeamDelta -= 300;
+        // -------------------------
+        // Bonus/penalty sources (suppressed if sabotaged)
+        // -------------------------
+        if (!sabotageActive) {
+          // SHOWMAN passive
+          if (rid === 'showman' && isSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
 
-        // maestro passive ★変更：失敗はコンボ消滅のみ（減点なし）
-        if (rid === 'maestro') {
-          if (isSuccess) {
-            const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
-            singer.combo = nextCombo;
-            const bonus = 250 * nextCombo;
-            selfDelta += bonus;
-            logLines.push(`COMBO x${nextCombo} (+${bonus})`);
-          } else {
-            const had = singer.combo ?? 0;
-            singer.combo = 0;
-            if (had > 0) logLines.push(`COMBO BROKEN (no penalty)`);
+          // SABOTEUR passive: enemy team -300
+          if (rid === 'saboteur' && isSuccess) applyTeamDeltaWithMitigation(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
+
+          // MAESTRO passive (combo)
+          if (rid === 'maestro') {
+            if (isSuccess) {
+              const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
+              singer.combo = nextCombo;
+              const bonus = 250 * nextCombo;
+              applySingerDelta(bonus, `MAESTRO PASSIVE (COMBO x${nextCombo} => +${bonus})`);
+            } else {
+              const had = singer.combo ?? 0;
+              singer.combo = 0;
+              if (had > 0) notes.push(`NOTE MAESTRO: COMBO broken (no score penalty)`);
+            }
+          }
+
+          // GAMBLER passive
+          if (rid === 'gambler' && isSuccess) {
+            const choices = [-500, 0, 500, 1000, 1500];
+            const b = choices[Math.floor(Math.random() * choices.length)];
+            applySingerDelta(b, `GAMBLER PASSIVE (RNG bonus)`);
+          }
+
+          // MIMIC passive (last team delta 30%)
+          if (rid === 'mimic' && isSuccess) {
+            const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
+            if (last > 0) {
+              const bonus = roundToStep(last * 0.3, 100);
+              applySingerDelta(bonus, `MIMIC PASSIVE (30% of last ally success ${last})`);
+            }
+          }
+
+          // TEAM buff: next success bonus
+          if (isSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
+            const b = teamBuffsTx[t].nextSuccessBonus;
+            applySingerDelta(b, `TEAM BUFF (NEXT SUCCESS BONUS +${b})`);
+            teamBuffsTx[t].nextSuccessBonus = 0;
+          }
+
+          // HYPE ULT: success +500 for 3 turns
+          if (isSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
+            applySingerDelta(500, 'HYPE ULT (success +500)');
+          }
+          if ((teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
+            teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
+          }
+
+          // Legacy roar
+          if (isSuccess && (teamBuffsTx[t]?.roarRemaining ?? 0) > 0) {
+            applySingerDelta(500, `ROAR BUFF (+500)`);
+            teamBuffsTx[t].roarRemaining = Math.max(0, (teamBuffsTx[t].roarRemaining ?? 0) - 1);
+          }
+
+          // ---- Armed buffs ----
+          if (singer.buffs?.maestroSkill) {
+            if (!isSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
+            else {
+              const before = singer.combo ?? 0;
+              const after = clamp(before + 2, 0, 5);
+              singer.combo = after;
+              notes.push(`NOTE MAESTRO SKILL: COMBO +2 (x${before} -> x${after})`);
+            }
+            singer.buffs.maestroSkill = false;
+          }
+
+          if (singer.buffs?.encore) {
+            if (isSuccess) applySingerDelta(1200, 'SHOWMAN SKILL (ENCORE +1200 on success)');
+            singer.buffs.encore = false;
+          }
+
+          if (singer.buffs?.doubleDown) {
+            if (isSuccess) {
+              const extra = singerTurnDelta; // already applied delta -> doubling means add same amount again
+              applySingerDelta(extra, 'GAMBLER SKILL (DOUBLE DOWN x2)');
+            } else {
+              applySingerDelta(-2000, 'GAMBLER SKILL (DOUBLE DOWN fail -2000)');
+            }
+            singer.buffs.doubleDown = false;
+          }
+
+          if (singer.buffs?.gamblerUlt) {
+            const head = Math.random() < 0.5;
+            const delta = head ? 4000 : -1000;
+            applySingerDelta(delta, `GAMBLER ULT (coinflip ${head ? 'HEAD +4000' : 'TAIL -1000'})`);
+            singer.buffs.gamblerUlt = false;
+          }
+
+          if (singer.buffs?.spotlight) {
+            if (isSuccess) applyTeamDeltaWithMitigation(et, -2000, 'SHOWMAN ULT (SPOTLIGHT enemy -2000 on success)');
+            else applySingerDelta(-1000, 'SHOWMAN ULT (SPOTLIGHT self -1000 on fail)');
+            singer.buffs.spotlight = false;
+          }
+
+          if (singer.buffs?.echo) {
+            const lastTurn = data.lastTurnDelta ?? 0;
+            const add = roundToStep(lastTurn * 0.5, 100);
+            applySingerDelta(add, `MIMIC SKILL (ECHO 50% of last turn ${fmt(lastTurn)})`);
+            singer.buffs.echo = false;
+          }
+
+          if (isSuccess && singer.buffs?.hypeBoost?.value) {
+            const v = singer.buffs.hypeBoost.value;
+            applySingerDelta(v, 'HYPE SKILL (selected ally success +2000)');
+            singer.buffs.hypeBoost = null;
+          }
+
+          if (singer.buffs?.stolenSkill) {
+            const stolen: RoleId = singer.buffs.stolenSkill;
+            if (stolen === 'showman') singer.buffs.encore = true;
+            else if (stolen === 'maestro') singer.buffs.maestroSkill = true;
+            else if (stolen === 'gambler') singer.buffs.doubleDown = true;
+            else if (stolen === 'hype') {
+              teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 1000 };
+              notes.push(`NOTE MIMIC ULT: stolen hype -> TEAM ${t} next success +1000`);
+            } else {
+              if (isSuccess) applySingerDelta(800, `MIMIC ULT (stolen default bonus +800)`);
+            }
+            singer.buffs.stolenSkill = null;
+            notes.push(`NOTE MIMIC ULT: applied stolenRole=${stolen}`);
+          }
+
+          // SAFE (team +300 on fail)
+          if (!isSuccess && singer.buffs?.safe) {
+            applyTeamDeltaWithMitigation(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
+            singer.buffs.safe = false;
+          }
+
+          // UNDERDOG ULT fail debt
+          if (singer.buffs?.clutchDebt) {
+            if (!isSuccess) applySingerDelta(-500, 'UNDERDOG ULT (fail -500)');
+            singer.buffs.clutchDebt = false;
           }
         }
 
-        
-// gambler passive
-        if (rid === 'gambler' && isSuccess) {
-          const choices = [-500, 0, 500, 1000, 1500];
-          const b = choices[Math.floor(Math.random() * choices.length)];
-          selfDelta += b;
-          logLines.push(`GAMBLER PASSIVE ${fmt(b)}`);
-        }
-
-        // mimic passive
-        if (rid === 'mimic' && isSuccess) {
-          const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
-          if (last > 0) {
-            const bonus = roundToStep(last * 0.3, 100);
-            selfDelta += bonus;
-            logLines.push(`MIMIC PASSIVE +${bonus}`);
-          }
-        }
-
-        // team nextSuccessBonus
-        if (isSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
-          const b = teamBuffsTx[t].nextSuccessBonus;
-          selfDelta += b;
-          teamBuffsTx[t].nextSuccessBonus = 0;
-          logLines.push(`TEAM BONUS +${b}`);
-        }
-
-        // hype ult
-        if (isSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
-          selfDelta += 500;
-          logLines.push(`HYPE ULT +500`);
-        }
-        if ((teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
-          teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
-        }
-
-        // roar (旧)
-        if (isSuccess && (teamBuffsTx[t]?.roarRemaining ?? 0) > 0) {
-          selfDelta += 500;
-          teamBuffsTx[t].roarRemaining = Math.max(0, (teamBuffsTx[t].roarRemaining ?? 0) - 1);
-          logLines.push(`ROAR +500 (remain ${teamBuffsTx[t].roarRemaining})`);
-        }
-
-        // ===== Armed buffs =====
-        if (singer.buffs?.maestroSkill) {
-          if (isSuccess) {
-            const before = singer.combo ?? 0;
-            const after = clamp(before + 2, 0, 5);
-            singer.combo = after;
-            logLines.push(`SKILL MAESTRO: COMBO +2 (x${before} -> x${after})`);
-          } else {
-            selfDelta -= 500;
-            logLines.push(`SKILL MAESTRO: FAIL -500`);
-          }
-          singer.buffs.maestroSkill = false;
-        }
-
-        if (singer.buffs?.encore) {
-          if (isSuccess) selfDelta += 1200;
-          singer.buffs.encore = false;
-          logLines.push(`ENCORE ${isSuccess ? '+1200' : '+0'}`);
-        }
-
-        if (singer.buffs?.doubleDown) {
-          if (isSuccess) selfDelta = selfDelta * 2;
-          else selfDelta -= 2000;
-          singer.buffs.doubleDown = false;
-          logLines.push(`DOUBLE DOWN ${isSuccess ? 'x2' : '-2000'}`);
-        }
-
-        if (singer.buffs?.gamblerUlt) {
-          const head = Math.random() < 0.5;
-          const delta = head ? 4000 : -1000;
-          selfDelta += delta;
-          singer.buffs.gamblerUlt = false;
-          logLines.push(`GAMBLER ULT ${head ? '+4000' : '-1000'}`);
-        }
-
-        if (singer.buffs?.spotlight) {
-          if (isSuccess) enemyTeamDelta -= 2000;
-          else selfDelta -= 1000;
-          singer.buffs.spotlight = false;
-          logLines.push(`SPOTLIGHT ${isSuccess ? 'enemy -2000' : 'self -1000'}`);
-        }
-
-        if (singer.buffs?.echo) {
-          const lastTurn = data.lastTurnDelta ?? 0;
-          const add = roundToStep(lastTurn * 0.5, 100);
-          selfDelta += add;
-          singer.buffs.echo = false;
-          logLines.push(`ECHO ${fmt(add)} (from last ${fmt(lastTurn)})`);
-        }
-
-        if (isSuccess && singer.buffs?.hypeBoost?.value) {
-          const v = singer.buffs.hypeBoost.value;
-          selfDelta += v;
-          singer.buffs.hypeBoost = null;
-          logLines.push(`HYPE BOOST +${v}`);
-        }
-
-        if (singer.buffs?.stolenSkill) {
-          const stolen: RoleId = singer.buffs.stolenSkill;
-          if (stolen === 'showman') singer.buffs.encore = true;
-          else if (stolen === 'maestro') singer.buffs.maestroSkill = true;
-          else if (stolen === 'gambler') singer.buffs.doubleDown = true;
-          else if (stolen === 'hype') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 1000 };
-          } else {
-            if (isSuccess) selfDelta += 800;
-          }
-          singer.buffs.stolenSkill = null;
-          logLines.push(`STEAL ROLE applied: ${stolen}`);
-        }
-
-        if (!isSuccess && singer.buffs?.safe) {
-          teamDelta += 300;
-          singer.buffs.safe = false;
-          logLines.push(`SAFE TRIGGER team +300`);
-        }
-
-        if (selfDelta < 0 && singer.buffs?.intercept?.by) {
+        // -------------------------
+        // INTERCEPT (apply after final delta decided)
+        // -------------------------
+        if (singer.buffs?.intercept?.by && singerTurnDelta < 0) {
           const byId = singer.buffs.intercept.by;
           const tank = mems.find((m: any) => m.id === byId);
+          const penalty = Math.abs(singerTurnDelta);
+
+          // cancel singer penalty
+          applySingerDelta(+penalty, 'IRONWALL SKILL (INTERCEPT: cancel target negative)');
+
+          // tank takes half penalty
+          const transferred = roundToStep(penalty * 0.5, 100);
           if (tank) {
-            const transferred = roundToStep(Math.abs(selfDelta) * 0.5, 100);
-            selfDelta = 0;
-            tank.score = (tank.score ?? 0) - transferred;
-            logLines.push(`INTERCEPT: -${transferred} -> ${tank.name}`);
+            applyOtherPlayerDelta(tank, -transferred, 'IRONWALL SKILL (INTERCEPT: tank takes half)');
+          } else {
+            notes.push(`NOTE INTERCEPT: tank not found (id=${byId})`);
           }
+
           singer.buffs.intercept = null;
         }
 
-        if (!isSuccess && singer.buffs?.clutchDebt) {
-          selfDelta -= 500;
-          singer.buffs.clutchDebt = false;
-          logLines.push(`UNDERDOG ULT FAIL -500`);
-        } else if (singer.buffs?.clutchDebt) {
-          singer.buffs.clutchDebt = false;
-        }
-
-        // SABOTAGE override
-        if (sabotage) {
-          const forced = isSuccess ? 0 : -800;
-          selfDelta = forced;
-          singer.debuffs.sabotaged = null;
-          logLines.push(`SABOTAGE OVERRIDE -> ${fmt(forced)}`);
-        }
-
-        // barrier / ironwall reduce team negative
-        const serial = data.turnSerial ?? 0;
-        const barrierActive = (teamBuffsTx[t]?.barrierUntil ?? -1) > serial;
-        const ironwallActive = mems.some((m: any) => m.team === t && m.role?.id === 'ironwall');
-
-        if (teamDelta < 0) {
-          if (barrierActive) {
-            teamDelta = 0;
-            logLines.push(`BARRIER BLOCKED team negative`);
-          } else if (ironwallActive) {
-            const reduced = roundToStep(teamDelta * 0.7, 100);
-            logLines.push(`IRONWALL reduced team negative ${fmt(teamDelta)} -> ${fmt(reduced)}`);
-            teamDelta = reduced;
-          }
-        }
-
-        if (enemyTeamDelta < 0) {
-          const enemyBarrier = (teamBuffsTx[et]?.barrierUntil ?? -1) > serial;
-          const enemyIronwall = mems.some((m: any) => m.team === et && m.role?.id === 'ironwall');
-          if (enemyBarrier) {
-            enemyTeamDelta = 0;
-            logLines.push(`ENEMY BARRIER BLOCKED enemy negative`);
-          } else if (enemyIronwall) {
-            const reduced = roundToStep(enemyTeamDelta * 0.7, 100);
-            logLines.push(`ENEMY IRONWALL reduced enemy negative ${fmt(enemyTeamDelta)} -> ${fmt(reduced)}`);
-            enemyTeamDelta = reduced;
-          }
-        }
-
-        // Apply
-        singer.score = (singer.score ?? 0) + selfDelta;
-
-        const prevTS = { ...teamScoresTx };
-        teamScoresTx = {
-          ...teamScoresTx,
-          [t]: (teamScoresTx[t] ?? 0) + selfDelta + teamDelta,
-          [et]: (teamScoresTx[et] ?? 0) + enemyTeamDelta,
-        };
-
-        // store lastTeamDelta for mimic passive
-        if (isSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: selfDelta };
+        // Save lastTeamDelta for mimic passive
+        if (isSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: singerTurnDelta };
         else teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: teamBuffsTx[t]?.lastTeamDelta ?? 0 };
 
-        const lastTurnDelta = selfDelta;
+        const lastTurnDelta = singerTurnDelta;
 
         // Deal next mission to singer
         const pool = normalizeThemePool(data.themePool);
@@ -2150,30 +2202,25 @@ export const GamePlayTeamScreen = () => {
         const nextIndex = findNextReadyIndex(mems, idx);
         const nextSingerLocal = mems[nextIndex] || singer;
 
-        // Start-of-turn auras
-        const auraRes = computeStartAuras(mems, nextSingerLocal, teamScoresTx);
-        const finalTS = auraRes.teamScores;
+        // Start-of-turn auras (detailed)
+        const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx);
+        const auraChanges: ScoreChange[] = [];
+        for (const ap of auraPlans) {
+          const from = teamScoresTx[ap.team] ?? 0;
+          const to = from + ap.delta;
+          teamScoresTx = { ...teamScoresTx, [ap.team]: to };
+          auraChanges.push({ scope: 'TEAM', target: `TEAM ${ap.team}`, from, to, delta: ap.delta, reason: `AURA: ${ap.reason}` });
+        }
 
         const nextSerial = serial + 1;
 
-        // Detailed logs
+        // Detailed log entry lines
+        const changeLines = changes.map(fmtChangeLine);
+        const auraLines = auraChanges.map(fmtChangeLine);
+
         const resultTitle = `${isSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
-        const detailLines: string[] = [];
-        detailLines.push(`PLAYER ${singer.name} (${singer.role?.name || '—'}) => ${fmt(selfDelta)}`);
-        detailLines.push(`TEAM ${t} => ${fmt(selfDelta + teamDelta)} (teamExtra ${fmt(teamDelta)})`);
-        if (enemyTeamDelta !== 0) detailLines.push(`TEAM ${et} => ${fmt(enemyTeamDelta)}`);
+        const themeLine = `THEME ${cardTitle(currentChallenge)} / ${cardCriteria(currentChallenge)}`;
 
-        if (auraRes.auraAdd !== 0) detailLines.push(`NOTE AURA: next turn TEAM ${nextSingerLocal.team} ${fmt(auraRes.auraAdd)}`);
-        for (const l of logLines) detailLines.push(l);
-
-        const newLogs = capLogs([
-          ...(data.logs || []),
-          `RESULT: ${singer.name} ${isSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t})`,
-          ...logLines.map((x) => ` - ${x}`),
-          `TURN START: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
-        ]);
-
-        const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
         const resultEntry: LogEntry = {
           ts: Date.now(),
           kind: 'RESULT',
@@ -2182,14 +2229,14 @@ export const GamePlayTeamScreen = () => {
           team: singer.team,
           title: `${isSuccess ? 'SUCCESS' : 'FAIL'} / ${singer.role?.name || 'ROLE'}`,
           lines: [
-            `SELF: ${fmt(selfDelta)}`,
-            `TEAM ${t}: ${fmt((finalTS[t] ?? 0) - (prevTS[t] ?? 0))} (after aura)`,
-            `TEAM ${et}: ${fmt((finalTS[et] ?? 0) - (prevTS[et] ?? 0))} (after aura)`,
-            `THEME: ${cardTitle(currentChallenge)}`,
-            `COND: ${cardCriteria(currentChallenge)}`,
-            ...logLines,
+            themeLine,
+            `NOTE TURN DELTA (net): ${fmt(singerTurnDelta)}`,
+            '— SCORE CHANGES (this turn) —',
+            ...(changeLines.length ? changeLines : ['(no score change)']),
+            ...(notes.length ? ['— NOTES —', ...notes] : []),
           ],
         };
+
         const turnEntry: LogEntry = {
           ts: Date.now(),
           kind: 'TURN',
@@ -2197,14 +2244,38 @@ export const GamePlayTeamScreen = () => {
           actorId: nextSingerLocal?.id,
           team: nextSingerLocal?.team,
           title: 'NEXT TURN',
-          lines: [`NEXT: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`],
+          lines: [
+            `NOTE NEXT: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
+            ...(auraLines.length ? ['— AURA SCORE CHANGES (turn start) —', ...auraLines] : []),
+          ],
         };
 
+        const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
         const newEntries = capEntries([...entries, resultEntry, turnEntry]);
+
+        // lastLog overlay detail (show changes + aura + theme)
+        const detailLines: string[] = [];
+        detailLines.push(`THEME ${cardTitle(currentChallenge)} / ${cardCriteria(currentChallenge)}`);
+        detailLines.push(`NOTE NET DELTA ${fmt(singerTurnDelta)}`);
+        for (const l of changeLines) detailLines.push(l);
+        for (const n of notes) detailLines.push(n);
+        if (auraLines.length) {
+          detailLines.push(`NOTE NEXT TURN AURA`);
+          for (const l of auraLines) detailLines.push(l);
+        }
+
+        const newLogs = capLogs([
+          ...(data.logs || []),
+          `RESULT: ${singer.name} ${isSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t}) net ${fmt(singerTurnDelta)}`,
+          ...changeLines.map((x) => ` - ${x}`),
+          ...(notes.length ? notes.map((x) => ` - ${x}`) : []),
+          `TURN START: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
+          ...auraLines.map((x) => ` - ${x}`),
+        ]);
 
         tx.update(ref, {
           members: mems,
-          teamScores: finalTS,
+          teamScores: teamScoresTx,
           teamBuffs: teamBuffsTx,
           currentTurnIndex: nextIndex,
           turnSerial: nextSerial,
@@ -2265,16 +2336,9 @@ export const GamePlayTeamScreen = () => {
       {/* Confirm modal */}
       <ConfirmModal state={confirmState} busy={busy} onClose={() => !busy && setConfirmState(null)} />
 
-      {/* GUIDE modal (復帰) */}
+      {/* GUIDE modal */}
       <AnimatePresence>
-        {showGuide && (
-          <GuideModal
-            open={showGuide}
-            onClose={() => setShowGuide(false)}
-            members={sortedMembers}
-            usedRoleIds={usedRoleIds}
-          />
-        )}
+        {showGuide && <GuideModal open={showGuide} onClose={() => setShowGuide(false)} members={sortedMembers} usedRoleIds={usedRoleIds} />}
       </AnimatePresence>
 
       {/* JOIN WIZARD */}
@@ -2366,49 +2430,54 @@ export const GamePlayTeamScreen = () => {
               </div>
 
               <div className="mt-3 flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-2">
-                {logEntries.slice().reverse().map((e, i) => (
-                  <div key={`${e.ts}-${i}`} className={`rounded-xl border ${kindColorClass(e.kind)} p-3`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="text-lg">{iconOf(e.kind)}</div>
-                          <div className="font-black tracking-widest text-sm truncate">{e.title}</div>
-                          {e.team && (
-                            <span className={`text-[9px] font-black px-2 py-0.5 rounded ${e.team === 'A' ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/30' : 'bg-red-500/20 text-red-200 border border-red-500/30'}`}>
-                              TEAM {e.team}
-                            </span>
-                          )}
-                        </div>
-                        {e.actorName && <div className="text-[10px] font-mono tracking-widest text-white/60 mt-0.5 truncate">BY: {e.actorName}</div>}
-                      </div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/40 flex-none">{formatTime(e.ts)}</div>
-                    </div>
-
-                    <div className="mt-2 space-y-1">
-                      {e.lines.map((l, idx) => {
-                        const neg = l.includes('-');
-                        const pos = l.includes('+');
-                        const cls = neg ? 'text-red-300' : pos ? 'text-cyan-200' : 'text-white/70';
-                        return (
-                          <div key={idx} className={`text-[11px] leading-relaxed ${cls}`}>
-                            • {l}
+                {logEntries
+                  .slice()
+                  .reverse()
+                  .map((e, i) => (
+                    <div key={`${e.ts}-${i}`} className={`rounded-xl border ${kindColorClass(e.kind)} p-3`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <div className="text-lg">{iconOf(e.kind)}</div>
+                            <div className="font-black tracking-widest text-sm truncate">{e.title}</div>
+                            {e.team && (
+                              <span
+                                className={`text-[9px] font-black px-2 py-0.5 rounded ${
+                                  e.team === 'A'
+                                    ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/30'
+                                    : 'bg-red-500/20 text-red-200 border border-red-500/30'
+                                }`}
+                              >
+                                TEAM {e.team}
+                              </span>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                          {e.actorName && <div className="text-[10px] font-mono tracking-widest text-white/60 mt-0.5 truncate">BY: {e.actorName}</div>}
+                        </div>
+                        <div className="text-[10px] font-mono tracking-widest text-white/40 flex-none">{formatTime(e.ts)}</div>
+                      </div>
 
-                {logEntries.length === 0 && (
-                  <div className="text-[11px] text-white/40 font-mono tracking-widest">NO LOG ENTRIES YET</div>
-                )}
+                      <div className="mt-2 space-y-1">
+                        {e.lines.map((l, idx2) => {
+                          const neg = l.includes('-');
+                          const pos = l.includes('+');
+                          const cls = neg ? 'text-red-300' : pos ? 'text-cyan-200' : 'text-white/70';
+                          return (
+                            <div key={idx2} className={`text-[11px] leading-relaxed ${cls}`}>
+                              • {l}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                {logEntries.length === 0 && <div className="text-[11px] text-white/40 font-mono tracking-widest">NO LOG ENTRIES YET</div>}
 
                 <div className="h-6" />
               </div>
 
-              <div className="pt-3 border-t border-white/10 text-[10px] font-mono tracking-widest text-white/40">
-                （旧ログ）{logs.length} 行
-              </div>
+              <div className="pt-3 border-t border-white/10 text-[10px] font-mono tracking-widest text-white/40">（旧ログ）{logs.length} 行</div>
             </motion.div>
           </div>
         )}
@@ -2474,7 +2543,6 @@ export const GamePlayTeamScreen = () => {
               🧾
             </button>
 
-            {/* ★GUIDEボタン復帰 */}
             <button
               onClick={() => setShowGuide(true)}
               className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-yellow-300 hover:bg-yellow-900/30 hover:border-yellow-500 transition-all active:scale-95"
@@ -2536,16 +2604,16 @@ export const GamePlayTeamScreen = () => {
 
                 <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
                   <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                    {displayCandidates.map((cand: any, idx: number) => (
+                    {displayCandidates.map((cand: any, idx2: number) => (
                       <motion.button
-                        key={`${cardTitle(cand)}-${idx}`}
+                        key={`${cardTitle(cand)}-${idx2}`}
                         whileHover={{ scale: 1.05, borderColor: '#facc15' }}
                         whileTap={{ scale: 0.95 }}
                         onClick={() => requestPickCandidate(selectionOwner.id, cand, false)}
                         disabled={busy}
                         className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
                       >
-                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx + 1}</div>
+                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
                         <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
                         <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
                       </motion.button>
@@ -2622,10 +2690,7 @@ export const GamePlayTeamScreen = () => {
           <div className="flex justify-between items-center px-1">
             <span className="text-[8px] font-bold text-gray-500 tracking-widest">RESERVATION LIST</span>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowGuide(true)}
-                className="text-[8px] text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 rounded hover:bg-yellow-500/20"
-              >
+              <button onClick={() => setShowGuide(true)} className="text-[8px] text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 rounded hover:bg-yellow-500/20">
                 GUIDE
               </button>
               {isHost && (
@@ -2657,7 +2722,6 @@ export const GamePlayTeamScreen = () => {
                     <div className="text-lg">{member.avatar}</div>
                     <div className="flex-1 min-w-0">
                       <div className={`text-[10px] font-bold truncate ${isCurrent ? 'text-white' : 'text-gray-300'}`}>{member.name}</div>
-                      {/* ★ロール表示追加 */}
                       <div className="text-[8px] font-mono text-white/50 truncate">
                         TEAM {member.team || '?'} ・ ROLE {roleLabel}
                       </div>
@@ -2737,9 +2801,7 @@ export const GamePlayTeamScreen = () => {
                 <div className="absolute top-0 right-0 bg-white/10 px-2 py-0.5 rounded-bl-lg text-[9px] font-mono text-gray-400">{isCurrent ? 'NOW' : 'UPCOMING'}</div>
 
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center text-lg">
-                    {member.avatar}
-                  </div>
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center text-lg">{member.avatar}</div>
 
                   <div className="flex flex-col min-w-0">
                     <div className="flex items-center gap-2">
@@ -2748,7 +2810,6 @@ export const GamePlayTeamScreen = () => {
                       {needsSelection(member) && <span className="text-[9px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-1.5 rounded font-bold">CHOOSE</span>}
                     </div>
 
-                    {/* ★ロール表示追加 */}
                     <div className="flex items-center gap-2 text-[10px] font-mono">
                       <span className={`font-bold ${member.team === 'A' ? 'text-cyan-300' : member.team === 'B' ? 'text-red-300' : 'text-gray-500'}`}>TEAM {member.team || '?'}</span>
                       <span className="text-gray-500">|</span>
