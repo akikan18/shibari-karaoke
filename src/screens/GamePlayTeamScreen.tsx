@@ -135,7 +135,6 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'THE MAESTRO',
     type: 'ATK',
     sigil: '⬢',
-    // ★失敗時はコンボ消滅だけ
     passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
     skill: 'SKILL: (3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
     ult: 'ULT: (1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
@@ -347,14 +346,14 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
   useEffect(() => {
     const timer = setTimeout(() => {
       onCloseRef.current?.();
-    }, 2600);
+    }, 2200);
     return () => clearTimeout(timer);
   }, [actionLog]);
 
   if (!actionLog) return null;
 
   const details = actionLog.detail ? String(actionLog.detail).split('\n') : [];
-  const limited = details.slice(0, 8);
+  const limited = details.slice(0, 4);
   const omitted = details.length - limited.length;
 
   const isSuccess = String(actionLog.title || '').toUpperCase().includes('SUCCESS');
@@ -367,7 +366,7 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
         animate={{ x: 0 }}
         exit={{ x: '-100%' }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="w-full bg-gradient-to-r from-black/80 via-black/95 to-black/80 border-y-2 border-white/20 py-6 md:py-10 flex flex-col items-center justify-center relative backdrop-blur-sm"
+        className="w-full bg-gradient-to-r from-black/80 via-black/95 to-black/80 border-y-2 border-white/20 py-6 md:py-9 flex flex-col items-center justify-center relative backdrop-blur-sm"
       >
         <div className="absolute inset-0 opacity-50" style={{ background: `radial-gradient(circle at 50% 50%, ${headlineColor}22, transparent 60%)` }} />
 
@@ -378,24 +377,13 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
 
         <div className="flex flex-col gap-2 items-center w-full px-4">
           {limited.map((line: string, idx: number) => {
-            const isNegative = line.includes('-');
+            const isNegative = line.includes('(-') || line.includes(' -') || line.includes('(-');
             const isTeam = line.startsWith('TEAM ');
-            const isPlayer = line.startsWith('PLAYER ');
-            const isNote = line.startsWith('NOTE ') || line.startsWith('THEME ');
-            const isAbility = line.startsWith('SKILL ') || line.startsWith('ULT ') || line.startsWith('BLACKOUT') || line.startsWith('SABOTAGE');
-
-            const colorClasses =
-              isAbility
-                ? 'text-yellow-200 border-yellow-500/30 bg-yellow-900/20'
-                : isNote
-                ? 'text-gray-300 border-white/10 bg-white/5'
-                : isNegative
-                ? 'text-red-400 border-red-500/30 bg-red-900/20'
-                : isTeam
-                ? 'text-cyan-300 border-cyan-500/30 bg-cyan-900/20'
-                : isPlayer
-                ? 'text-emerald-200 border-emerald-500/30 bg-emerald-900/15'
-                : 'text-white border-white/10 bg-black/30';
+            const colorClasses = isTeam
+              ? isNegative
+                ? 'text-red-300 border-red-500/30 bg-red-900/20'
+                : 'text-cyan-200 border-cyan-500/30 bg-cyan-900/20'
+              : 'text-white border-white/10 bg-black/30';
 
             return (
               <motion.div
@@ -726,7 +714,7 @@ const TargetModal = ({
 };
 
 // =========================
-// Guide Modal (復帰)
+// Guide Modal
 // =========================
 const GuideModal = ({
   open,
@@ -833,7 +821,8 @@ const MissionDisplay = React.memo(({ title, criteria, stateText }: any) => {
   };
 
   return (
-    <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
+    
+<motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
       <div className="w-full flex flex-col items-center mt-1 md:mt-2 px-2 overflow-visible">
         <div className="inline-block px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono tracking-[0.2em] text-[8px] md:text-xs mb-1 md:mb-2 font-bold">
           CURRENT THEME
@@ -921,8 +910,7 @@ export const GamePlayTeamScreen = () => {
     setUserId(ui.userId);
     setIsHost(!!ui.isHost);
 
-   
- const unsub = onSnapshot(doc(db, 'rooms', ui.roomId), (snap) => {
+    const unsub = onSnapshot(doc(db, 'rooms', ui.roomId), (snap) => {
       if (!snap.exists()) {
         navigate('/');
         return;
@@ -1920,12 +1908,11 @@ export const GamePlayTeamScreen = () => {
         if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
         if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
 
+        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A ?? 0, B: teamScoresTx.B ?? 0 };
+
         const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
         const serial = data.turnSerial ?? 0;
 
-        // -------------------------
-        // detailed score tracking
-        // -------------------------
         const changes: ScoreChange[] = [];
         const notes: string[] = [];
 
@@ -1956,7 +1943,7 @@ export const GamePlayTeamScreen = () => {
           changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from, to, delta: finalDelta, reason });
         };
 
-        let singerTurnDelta = 0; // singer's net delta applied to score/team
+        let singerTurnDelta = 0;
 
         const applySingerDelta = (delta: number, reason: string) => {
           if (delta === 0) return;
@@ -1966,7 +1953,6 @@ export const GamePlayTeamScreen = () => {
           singerTurnDelta += delta;
           changes.push({ scope: 'PLAYER', target: singer.name, from: fromP, to: toP, delta, reason });
 
-          // Team follows singer delta (since team points are sum of member deltas)
           const fromT = teamScoresTx[t] ?? 0;
           const toT = fromT + delta;
           teamScoresTx = { ...teamScoresTx, [t]: toT };
@@ -1987,14 +1973,10 @@ export const GamePlayTeamScreen = () => {
           changes.push({ scope: 'TEAM', target: `TEAM ${team}`, from: fromT, to: toT, delta, reason: `${reason} (by ${member.name})` });
         };
 
-        // -------------------------
-        // Base / sabotage
-        // -------------------------
         const rid: RoleId | undefined = singer.role?.id;
         const sabotage = singer.debuffs?.sabotaged;
         const sabotageActive = !!sabotage;
 
-        // 1) base singing score (overridden if sabotaged)
         if (sabotageActive) {
           const forced = isSuccess ? 0 : -800;
           applySingerDelta(forced, `SABOTEUR SKILL (SABOTAGE OVERRIDE: ${isSuccess ? '+0 on success' : '-800 on fail'})`);
@@ -2005,23 +1987,15 @@ export const GamePlayTeamScreen = () => {
           applySingerDelta(base, isSuccess ? 'BASE SUCCESS' : 'BASE FAIL');
         }
 
-        // 2) BLACKOUT (team debuff applied to singer turn)
         if ((teamBuffsTx[t]?.blackoutTurns ?? 0) > 0) {
           applySingerDelta(-2000, 'SABOTEUR ULT (BLACKOUT: -2000)');
           teamBuffsTx[t].blackoutTurns = Math.max(0, (teamBuffsTx[t].blackoutTurns ?? 0) - 1);
         }
 
-        // -------------------------
-        // Bonus/penalty sources (suppressed if sabotaged)
-        // -------------------------
         if (!sabotageActive) {
-          // SHOWMAN passive
           if (rid === 'showman' && isSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
-
-          // SABOTEUR passive: enemy team -300
           if (rid === 'saboteur' && isSuccess) applyTeamDeltaWithMitigation(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
 
-          // MAESTRO passive (combo)
           if (rid === 'maestro') {
             if (isSuccess) {
               const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
@@ -2035,14 +2009,12 @@ export const GamePlayTeamScreen = () => {
             }
           }
 
-          // GAMBLER passive
           if (rid === 'gambler' && isSuccess) {
             const choices = [-500, 0, 500, 1000, 1500];
             const b = choices[Math.floor(Math.random() * choices.length)];
             applySingerDelta(b, `GAMBLER PASSIVE (RNG bonus)`);
           }
 
-          // MIMIC passive (last team delta 30%)
           if (rid === 'mimic' && isSuccess) {
             const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
             if (last > 0) {
@@ -2051,14 +2023,12 @@ export const GamePlayTeamScreen = () => {
             }
           }
 
-          // TEAM buff: next success bonus
           if (isSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
             const b = teamBuffsTx[t].nextSuccessBonus;
             applySingerDelta(b, `TEAM BUFF (NEXT SUCCESS BONUS +${b})`);
             teamBuffsTx[t].nextSuccessBonus = 0;
           }
 
-          // HYPE ULT: success +500 for 3 turns
           if (isSuccess && (teamBuffsTx[t]?.hypeUltTurns ?? 0) > 0) {
             applySingerDelta(500, 'HYPE ULT (success +500)');
           }
@@ -2066,13 +2036,11 @@ export const GamePlayTeamScreen = () => {
             teamBuffsTx[t].hypeUltTurns = Math.max(0, (teamBuffsTx[t].hypeUltTurns ?? 0) - 1);
           }
 
-          // Legacy roar
           if (isSuccess && (teamBuffsTx[t]?.roarRemaining ?? 0) > 0) {
             applySingerDelta(500, `ROAR BUFF (+500)`);
             teamBuffsTx[t].roarRemaining = Math.max(0, (teamBuffsTx[t].roarRemaining ?? 0) - 1);
           }
 
-          // ---- Armed buffs ----
           if (singer.buffs?.maestroSkill) {
             if (!isSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
             else {
@@ -2091,7 +2059,7 @@ export const GamePlayTeamScreen = () => {
 
           if (singer.buffs?.doubleDown) {
             if (isSuccess) {
-              const extra = singerTurnDelta; // already applied delta -> doubling means add same amount again
+              const extra = singerTurnDelta;
               applySingerDelta(extra, 'GAMBLER SKILL (DOUBLE DOWN x2)');
             } else {
               applySingerDelta(-2000, 'GAMBLER SKILL (DOUBLE DOWN fail -2000)');
@@ -2140,31 +2108,24 @@ export const GamePlayTeamScreen = () => {
             notes.push(`NOTE MIMIC ULT: applied stolenRole=${stolen}`);
           }
 
-          // SAFE (team +300 on fail)
           if (!isSuccess && singer.buffs?.safe) {
             applyTeamDeltaWithMitigation(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
             singer.buffs.safe = false;
           }
 
-          // UNDERDOG ULT fail debt
           if (singer.buffs?.clutchDebt) {
             if (!isSuccess) applySingerDelta(-500, 'UNDERDOG ULT (fail -500)');
             singer.buffs.clutchDebt = false;
           }
         }
 
-        // -------------------------
-        // INTERCEPT (apply after final delta decided)
-        // -------------------------
         if (singer.buffs?.intercept?.by && singerTurnDelta < 0) {
           const byId = singer.buffs.intercept.by;
           const tank = mems.find((m: any) => m.id === byId);
           const penalty = Math.abs(singerTurnDelta);
 
-          // cancel singer penalty
           applySingerDelta(+penalty, 'IRONWALL SKILL (INTERCEPT: cancel target negative)');
 
-          // tank takes half penalty
           const transferred = roundToStep(penalty * 0.5, 100);
           if (tank) {
             applyOtherPlayerDelta(tank, -transferred, 'IRONWALL SKILL (INTERCEPT: tank takes half)');
@@ -2175,13 +2136,11 @@ export const GamePlayTeamScreen = () => {
           singer.buffs.intercept = null;
         }
 
-        // Save lastTeamDelta for mimic passive
         if (isSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: singerTurnDelta };
         else teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: teamBuffsTx[t]?.lastTeamDelta ?? 0 };
 
         const lastTurnDelta = singerTurnDelta;
 
-        // Deal next mission to singer
         const pool = normalizeThemePool(data.themePool);
         let deck: ThemeCard[] = Array.isArray(data.deck) && data.deck.length > 0 ? data.deck : shuffle(pool);
 
@@ -2198,11 +2157,9 @@ export const GamePlayTeamScreen = () => {
           singer.challenge = dealt.picked ?? { title: 'FREE THEME', criteria: '—' };
         }
 
-        // Move turn
         const nextIndex = findNextReadyIndex(mems, idx);
         const nextSingerLocal = mems[nextIndex] || singer;
 
-        // Start-of-turn auras (detailed)
         const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx);
         const auraChanges: ScoreChange[] = [];
         for (const ap of auraPlans) {
@@ -2214,11 +2171,9 @@ export const GamePlayTeamScreen = () => {
 
         const nextSerial = serial + 1;
 
-        // Detailed log entry lines
         const changeLines = changes.map(fmtChangeLine);
         const auraLines = auraChanges.map(fmtChangeLine);
 
-        const resultTitle = `${isSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
         const themeLine = `THEME ${cardTitle(currentChallenge)} / ${cardCriteria(currentChallenge)}`;
 
         const resultEntry: LogEntry = {
@@ -2253,16 +2208,14 @@ export const GamePlayTeamScreen = () => {
         const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
         const newEntries = capEntries([...entries, resultEntry, turnEntry]);
 
-        // lastLog overlay detail (show changes + aura + theme)
-        const detailLines: string[] = [];
-        detailLines.push(`THEME ${cardTitle(currentChallenge)} / ${cardCriteria(currentChallenge)}`);
-        detailLines.push(`NOTE NET DELTA ${fmt(singerTurnDelta)}`);
-        for (const l of changeLines) detailLines.push(l);
-        for (const n of notes) detailLines.push(n);
-        if (auraLines.length) {
-          detailLines.push(`NOTE NEXT TURN AURA`);
-          for (const l of auraLines) detailLines.push(l);
-        }
+        const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
+          const from = teamScoresBefore[team] ?? 0;
+          const to = teamScoresTx[team] ?? 0;
+          const delta = to - from;
+          return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
+        });
+
+        const resultTitle = `${isSuccess ? 'SUCCESS' : 'FAIL'}: ${singer.name}`;
 
         const newLogs = capLogs([
           ...(data.logs || []),
@@ -2285,7 +2238,7 @@ export const GamePlayTeamScreen = () => {
           logEntries: newEntries,
           turnAbilityUsed: false,
           lastTurnDelta,
-          lastLog: { timestamp: Date.now(), title: resultTitle, detail: detailLines.join('\n') },
+          lastLog: { timestamp: Date.now(), title: resultTitle, detail: overlayTeamLines.join('\n') },
         });
       });
     } finally {
@@ -2294,11 +2247,23 @@ export const GamePlayTeamScreen = () => {
   };
 
   // =========================
-  // End game
+  // End game (★ログ削除追加)
   // =========================
   const endGame = async () => {
     if (!roomId || !isHost) return;
-    await updateDoc(doc(db, 'rooms', roomId), { status: 'finished' });
+    const roomRef = doc(db, 'rooms', roomId);
+
+    // ★ ゲーム終了時にログ/オーバーレイ系をクリアして、再プレイ時に残らないようにする
+    await updateDoc(roomRef, {
+      status: 'finished',
+      logs: [],
+      logEntries: [],
+      lastLog: null,
+      abilityFx: null,
+      lastTurnDelta: 0,
+      turnAbilityUsed: false,
+    });
+
     navigate('/team-result');
   };
 
@@ -2327,21 +2292,13 @@ export const GamePlayTeamScreen = () => {
     <div className="w-full h-[100dvh] text-white overflow-hidden flex flex-col md:flex-row relative bg-[#0f172a]">
       <Toast messages={messages} onRemove={removeToast} />
 
-      {/* Turn result overlay */}
       <AnimatePresence>{activeActionLog && <ActionOverlay actionLog={activeActionLog} onClose={clearActionLog} />}</AnimatePresence>
-
-      {/* Skill/Ult overlay */}
       <AnimatePresence>{abilityFx && <AbilityFxOverlay fx={abilityFx} onDone={clearAbilityFx} />}</AnimatePresence>
 
-      {/* Confirm modal */}
       <ConfirmModal state={confirmState} busy={busy} onClose={() => !busy && setConfirmState(null)} />
 
-      {/* GUIDE modal */}
-      <AnimatePresence>
-        {showGuide && <GuideModal open={showGuide} onClose={() => setShowGuide(false)} members={sortedMembers} usedRoleIds={usedRoleIds} />}
-      </AnimatePresence>
+      <AnimatePresence>{showGuide && <GuideModal open={showGuide} onClose={() => setShowGuide(false)} members={sortedMembers} usedRoleIds={usedRoleIds} />}</AnimatePresence>
 
-      {/* JOIN WIZARD */}
       <JoinTeamRoleModal
         isOpen={joinStep !== null}
         step={(joinStep ?? 'team') as any}
@@ -2353,7 +2310,6 @@ export const GamePlayTeamScreen = () => {
         onBack={() => setJoinStep('team')}
       />
 
-      {/* TARGET MODAL */}
       <TargetModal
         isOpen={!!targetModal}
         title={targetModal?.title || ''}
@@ -2368,7 +2324,6 @@ export const GamePlayTeamScreen = () => {
         }}
       />
 
-      {/* PROXY modal (mission candidates) */}
       <AnimatePresence>
         {proxyTarget && (
           <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
@@ -2381,16 +2336,16 @@ export const GamePlayTeamScreen = () => {
 
               <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
                 <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                  {(proxyTarget.candidates || []).map((cand: any, idx: number) => (
+                  {(proxyTarget.candidates || []).map((cand: any, idx2: number) => (
                     <motion.button
-                      key={idx}
+                      key={idx2}
                       whileHover={{ scale: 1.05, borderColor: '#facc15' }}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => requestPickCandidate(proxyTarget.id, cand, true)}
                       disabled={busy}
                       className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
                     >
-                      <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx + 1}</div>
+                      <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
                       <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
                       <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
                     </motion.button>
@@ -2406,7 +2361,6 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* LOG drawer */}
       <AnimatePresence>
         {showLogsDrawer && (
           <div className="fixed inset-0 z-[210] flex justify-end">
@@ -2483,7 +2437,6 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* Host Missing */}
       <AnimatePresence>
         {!isHost && isHostMissing && (
           <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
@@ -2510,9 +2463,7 @@ export const GamePlayTeamScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* Main column */}
       <div className="flex-1 flex flex-col h-full relative z-10 min-w-0">
-        {/* Header */}
         <div className="flex-none h-14 md:h-20 flex items-center justify-between px-2 md:px-6 border-b border-white/10 bg-black/20 backdrop-blur-md overflow-hidden gap-2">
           <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0 overflow-hidden">
             <div className="flex-none w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center text-xl shadow-[0_0_15px_cyan] border border-white/20 font-bold">
@@ -2565,7 +2516,6 @@ export const GamePlayTeamScreen = () => {
           </div>
         </div>
 
-        {/* Effects bar */}
         <div className="flex-none px-2 md:px-6 py-2 border-b border-white/10 bg-black/10">
           <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">ACTIVE EFFECTS</div>
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
@@ -2581,7 +2531,6 @@ export const GamePlayTeamScreen = () => {
           </div>
         </div>
 
-        {/* Main Area */}
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 md:p-4 relative w-full overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
             <div className="w-[120%] aspect-square border border-cyan-500/20 rounded-full animate-[spin_20s_linear_infinite] max-h-[520px]" />
@@ -2627,7 +2576,6 @@ export const GamePlayTeamScreen = () => {
           </AnimatePresence>
         </div>
 
-        {/* Footer */}
         <div className="flex-none px-2 pb-2 md:pb-10 pt-1 bg-gradient-to-t from-black/90 to-transparent z-20 w-full">
           <div className="flex gap-2 md:gap-6 w-full max-w-5xl mx-auto">
             {canControlTurn ? (
@@ -2654,7 +2602,6 @@ export const GamePlayTeamScreen = () => {
               </div>
             )}
 
-            {/* Ability panel */}
             <div className="flex-1 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md p-2 md:p-3 flex flex-col gap-2">
               <div className="text-[8px] md:text-[10px] font-mono tracking-widest text-white/40">ABILITIES</div>
 
@@ -2685,7 +2632,6 @@ export const GamePlayTeamScreen = () => {
           </div>
         </div>
 
-        {/* Mobile Reservation List */}
         <div className="md:hidden w-full bg-black/80 backdrop-blur-md border-t border-white/10 p-1.5 pb-4 flex flex-col gap-1 flex-none">
           <div className="flex justify-between items-center px-1">
             <span className="text-[8px] font-bold text-gray-500 tracking-widest">RESERVATION LIST</span>
@@ -2758,7 +2704,6 @@ export const GamePlayTeamScreen = () => {
         </div>
       </div>
 
-      {/* Desktop Reservation List */}
       <div className="hidden md:flex w-[320px] lg:w-[380px] flex-none bg-black/60 backdrop-blur-xl border-l border-white/10 flex-col relative z-20 shadow-2xl">
         <div className="p-4 md:p-6 border-b border-white/10 bg-white/5 flex-none">
           <div className="flex items-center justify-between">
@@ -2851,7 +2796,6 @@ export const GamePlayTeamScreen = () => {
         )}
       </div>
 
-      {/* Finish Modal */}
       <AnimatePresence>
         {showFinishModal && (
           <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
