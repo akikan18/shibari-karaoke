@@ -15,6 +15,10 @@ import { ResultScreen } from './screens/ResultScreen';
 import { CustomThemeScreen } from './screens/CustomThemeScreen';
 import { FreeModeScreen } from './screens/FreeModeScreen.tsx';
 
+import { TeamDraftScreen } from './screens/TeamDraftScreen.tsx';
+import { GamePlayTeamScreen } from './screens/GamePlayTeamScreen.tsx';
+import ResultTeamScreen from './screens/ResultTeamScreen';
+
 function App() {
   const location = useLocation();
 
@@ -38,6 +42,11 @@ function App() {
           {/* ルーティング互換性のためのリダイレクト（念の為） */}
           <Route path="/topic-manage" element={<CustomThemeScreen />} />
           <Route path="/free-mode" element={<FreeModeScreen />} />
+          
+          <Route path="/team-draft" element={<TeamDraftScreen />} />
+          <Route path="/game-play-team" element={<GamePlayTeamScreen />} />
+
+          <Route path="/team-result" element={<ResultTeamScreen />} />
 
         </Routes>
       </AnimatePresence>
