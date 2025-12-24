@@ -501,7 +501,8 @@ export const EntranceScreen = () => {
                         {selectedAvatar}
                      </div>
                   </div>
-                  <div className="w-full overflow-x-auto pb-4 flex gap-3 no-scrollbar mask-linear-fade">
+                  {/* ★修正箇所: p-4 を追加して上下左右に余裕を持たせ、見切れを防止 */}
+                  <div className="w-full overflow-x-auto p-4 flex gap-3 no-scrollbar">
                     {AVATARS.map((avatar) => (
                       <button
                         type="button"
