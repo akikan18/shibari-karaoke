@@ -198,7 +198,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '☒',
     passive: '自分成功で敵チーム-300。',
     skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をリセットしパッシブ、スキル、ウルトを無効化',
+    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をすべてリセットしパッシブ、スキル、ウルトを無効化',
   },
   {
     id: 'underdog',
@@ -222,9 +222,9 @@ const ROLE_DEFS: RoleDef[] = [
 
 const roleDef = (id?: RoleId) => ROLE_DEFS.find((r) => r.id === id);
 
-const defaultRoleUses = (rid?: RoleId) => {
+const defaultRoleUses = (_rid?: RoleId) => {
   const skillUses = 3;
-  const ultUses = 1; // ORACLEもULTありに変更
+  const ultUses = 1;
   return { skillUses, ultUses };
 };
 
@@ -312,6 +312,15 @@ const findFirstReadyIndex = (mems: any[]) => {
   const n = mems.length;
   for (let i = 0; i < n; i++) if (isReadyForTurn(mems[i])) return i;
   return 0;
+};
+
+// =========================
+// TeamBuff normalize
+// =========================
+const normalizeTeamBuffs = (tbLike: any) => {
+  const A = tbLike?.A && typeof tbLike.A === 'object' ? tbLike.A : {};
+  const B = tbLike?.B && typeof tbLike.B === 'object' ? tbLike.B : {};
+  return { A: { ...A }, B: { ...B } };
 };
 
 // =========================
@@ -895,6 +904,7 @@ export const GamePlayTeamScreen = () => {
   // Selection confirmations
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
 
+
   // Overlay (turn result)
   const [activeActionLog, setActiveActionLog] = useState<any>(null);
   const lastLogTimestampRef = useRef<number>(0);
@@ -938,7 +948,7 @@ export const GamePlayTeamScreen = () => {
       setTurnSerial(data.turnSerial ?? 0);
 
       setTeamScores(data.teamScores || computeTeamScores(mems));
-      setTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+      setTeamBuffs(normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} }));
 
       setLogs(data.logs || []);
       setLogEntries(Array.isArray(data.logEntries) ? data.logEntries : []);
@@ -1048,21 +1058,25 @@ export const GamePlayTeamScreen = () => {
     if (roomData.status !== 'playing' || roomData.mode !== 'team') return;
 
     const mems = (roomData.members || []).slice();
+
     const hasMissingTurnOrder = mems.some((m: any) => m.turnOrder === undefined || m.turnOrder === null);
     const hasReadyMissingChallenge = mems.some((m: any) => isReadyForTurn(m) && !m.challenge && !(m.candidates && m.candidates.length > 0));
+    const hasMissingRoleUses = mems.some((m: any) => !!m.role?.id && (m.role.skillUses === undefined || m.role.skillUses === null || m.role.ultUses === undefined || m.role.ultUses === null));
+    const hasMissingTeamBuffKeys = !roomData.teamBuffs || !roomData.teamBuffs.A || !roomData.teamBuffs.B;
 
     const sorted = mems.slice().sort(sortByTurn);
     const idxMember = sorted[roomData.currentTurnIndex ?? 0];
     const currentIdxBad = idxMember && !isReadyForTurn(idxMember);
 
     const needsInit =
-      !roomData.teamBuffs ||
-      roomData.turnSkillUsed === undefined ||
-      roomData.turnUltUsed === undefined ||
       !roomData.teamScores ||
       hasMissingTurnOrder ||
       hasReadyMissingChallenge ||
-      currentIdxBad;
+      currentIdxBad ||
+      hasMissingRoleUses ||
+      hasMissingTeamBuffKeys ||
+      roomData.turnSkillUsed === undefined ||
+      roomData.turnUltUsed === undefined;
 
     if (!needsInit) return;
     if (initLockRef.current) return;
@@ -1084,14 +1098,17 @@ export const GamePlayTeamScreen = () => {
         const data: any = snap.data();
         if (data.status !== 'playing' || data.mode !== 'team') return;
 
+        let changed = false;
+
         let mems = (data.members || []).slice().sort(sortByTurn);
 
-        let changed = false;
         mems = mems.map((m: any) => {
           const rid: RoleId | undefined = m.role?.id;
           const defUses = defaultRoleUses(rid);
           const prevSkill = m.role?.skillUses;
           const prevUlt = m.role?.ultUses;
+
+          if (m.role && (prevSkill === undefined || prevSkill === null || prevUlt === undefined || prevUlt === null)) changed = true;
 
           const role = m.role
             ? {
@@ -1160,7 +1177,7 @@ export const GamePlayTeamScreen = () => {
         }
 
         const ts = data.teamScores || computeTeamScores(mems);
-        const tb = data.teamBuffs || { A: {}, B: {} };
+        const tb = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
         const updates: any = {
           members: mems,
@@ -1180,7 +1197,7 @@ export const GamePlayTeamScreen = () => {
             ts: Date.now(),
             kind: 'SYSTEM',
             title: 'INIT FIX',
-            lines: ['patched missing fields (turnOrder/mission/uses/etc)'],
+            lines: ['patched missing fields (turnOrder/mission/uses/teamBuffs/etc)'],
           };
           updates.logEntries = capEntries([...(updates.logEntries || []), e]);
         }
@@ -1205,15 +1222,22 @@ export const GamePlayTeamScreen = () => {
   const sealedThisTurnClient = useMemo(() => {
     const t = currentSinger?.team as TeamId | undefined;
     if (!t) return false;
-    return (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
+    const tb = normalizeTeamBuffs(teamBuffs);
+    return (tb?.[t]?.sealedTurns ?? 0) > 0;
   }, [teamBuffs, currentSinger?.team]);
+
+  // ★ IMPORTANT: DBにultUsesが無い(古いデータ)でも、UI側はデフォルト値でボタンを押せるようにする
+  const currentRoleId = (currentSinger?.role?.id as RoleId | undefined) || undefined;
+  const defaultsForCurrent = defaultRoleUses(currentRoleId);
+  const skillUsesLeft = currentSinger?.role ? (currentSinger.role.skillUses ?? defaultsForCurrent.skillUses) : 0;
+  const ultUsesLeft = currentSinger?.role ? (currentSinger.role.ultUses ?? defaultsForCurrent.ultUses) : 0;
 
   const canUseSkill =
     !!currentSinger &&
     !!currentSinger.role &&
     canOperateAbility &&
     !turnSkillUsed &&
-    (currentSinger.role.skillUses ?? 0) > 0 &&
+    skillUsesLeft > 0 &&
     !sealedThisTurnClient;
 
   const canUseUlt =
@@ -1221,7 +1245,7 @@ export const GamePlayTeamScreen = () => {
     !!currentSinger.role &&
     canOperateAbility &&
     !turnUltUsed &&
-    (currentSinger.role.ultUses ?? 0) > 0 &&
+    ultUsesLeft > 0 &&
     !sealedThisTurnClient;
 
   // candidates selection UI
@@ -1237,12 +1261,13 @@ export const GamePlayTeamScreen = () => {
   // ===== Effects chips =====
   const activeEffects = useMemo(() => {
     const chips: string[] = [];
+    const tbAll = normalizeTeamBuffs(teamBuffs);
 
     const addTeam = (t: TeamId) => {
-      const tb = teamBuffs?.[t] || {};
+      const tb = tbAll?.[t] || {};
       if ((tb.nextSuccessBonus ?? 0) > 0) chips.push(`TEAM ${t} NEXT +${tb.nextSuccessBonus}`);
       if ((tb.hypeUltTurns ?? 0) > 0) chips.push(`TEAM ${t} HYPE +500 (${tb.hypeUltTurns}T)`);
-      if ((tb.sealedTurns ?? 0) > 0) chips.push(`TEAM ${t} SEALED (THIS TURN)`);
+      if ((tb.sealedTurns ?? 0) > 0) chips.push(`TEAM ${t} SEALED (NEXT TEAM TURN)`);
       if ((tb.negHalfTurns ?? 0) > 0) chips.push(`TEAM ${t} NEG -50% (NEXT TEAM TURN)`);
       if ((tb.negZeroTurns ?? 0) > 0) chips.push(`TEAM ${t} NEG 0 (NEXT TEAM TURN)`);
     };
@@ -1576,7 +1601,7 @@ export const GamePlayTeamScreen = () => {
             <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-cyan-300">SKILL</span> を発動しますか？
           </div>
           <div className="text-[12px] text-white/70 leading-relaxed">{def?.skill}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {currentSinger.role.skillUses ?? 0}</div>
+          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {skillUsesLeft}</div>
         </div>
       ),
       confirmText: 'ACTIVATE',
@@ -1605,7 +1630,7 @@ export const GamePlayTeamScreen = () => {
             <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-yellow-300">ULT</span> を発動しますか？
           </div>
           <div className="text-[12px] text-white/70 leading-relaxed">{def?.ult}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {currentSinger.role.ultUses ?? 0}</div>
+          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {ultUsesLeft}</div>
         </div>
       ),
       confirmText: 'ACTIVATE',
@@ -1722,6 +1747,9 @@ export const GamePlayTeamScreen = () => {
         if (!snap.exists()) return;
 
         const data: any = snap.data();
+
+        const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+
         const mems = (data.members || [])
           .map((m: any) => {
             const rid: RoleId | undefined = m.role?.id;
@@ -1754,16 +1782,15 @@ export const GamePlayTeamScreen = () => {
 
         const singer = mems[idx];
         if (!singer) return;
+        if (!(singer.team === 'A' || singer.team === 'B')) return; // safety
+        const t: TeamId = singer.team;
+        const et: TeamId = t === 'A' ? 'B' : 'A';
 
         const canOperate =
           singer.id === userId || (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
         if (!canOperate) return;
 
-        const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
-        const t: TeamId = singer.team;
-        const et: TeamId = t === 'A' ? 'B' : 'A';
-
-        // sealed: skill/ult disabled
+        // sealed: skill/ult disabled (only for singer's team)
         if ((teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0) return;
 
         // skill/ult turn lock
@@ -1909,14 +1936,27 @@ export const GamePlayTeamScreen = () => {
             teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
             pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
           } else if (r === 'saboteur') {
+            // ✅ FIX: 味方チームには影響しない / 敵チームだけを1ターンSEALED + 特殊効果リセット
             const keepLast = teamBuffsTx?.[et]?.lastTeamDelta ?? 0;
-            teamBuffsTx[et] = { sealedTurns: 1, lastTeamDelta: keepLast };
+
+            // reset enemy team special effects, then seal for exactly 1 enemy-team turn
+            teamBuffsTx[et] = {
+              lastTeamDelta: keepLast,
+              sealedTurns: 1,
+              nextSuccessBonus: 0,
+              hypeUltTurns: 0,
+              negHalfTurns: 0,
+              negZeroTurns: 0,
+            };
+
+            // reset enemy members' local effects
             for (let i = 0; i < mems.length; i++) {
               if (mems[i]?.team === et) {
                 mems[i] = { ...mems[i], buffs: {}, debuffs: {} };
               }
             }
-            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects reset + sealed (passive/skill/ult disabled next team turn)`);
+
+            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects RESET + SEALED for 1 team-turn (passive/skill/ult disabled)`);
           } else if (r === 'underdog') {
             const my = teamScoresTx[t] ?? 0;
             const opp = teamScoresTx[et] ?? 0;
@@ -1934,7 +1974,7 @@ export const GamePlayTeamScreen = () => {
             singer.buffs.gamblerUlt = true;
             pushLines.push(`ULT GAMBLER: coinflip armed (+5000 / -1000)`);
           } else if (r === 'oracle') {
-            // ★追加：相手チーム全員のお題を3択に引き直し（1番目は現在のお題）
+            // ✅ ORACLE ULT: enemy team ALL reroll (3 choices, option1=current)
             const affected: string[] = [];
             for (let i = 0; i < mems.length; i++) {
               const m = mems[i];
@@ -1947,7 +1987,7 @@ export const GamePlayTeamScreen = () => {
               deckChanged = true;
 
               target.candidates = res.choices;
-              target.challenge = res.current; // 1番目は現在のお題として固定
+              target.challenge = res.current;
 
               mems[i] = target;
               affected.push(target.name);
@@ -1958,8 +1998,7 @@ export const GamePlayTeamScreen = () => {
           }
         }
 
-        
-// ---- MIMIC ULT (STEAL SKILL) ----
+        // ---- MIMIC ULT (STEAL SKILL) ----
         if (kind === 'ult' && r === 'mimic') {
           const stolen = opts.stolenRoleId;
           if (!stolen) return;
@@ -2090,6 +2129,9 @@ export const GamePlayTeamScreen = () => {
         if (!snap.exists()) return;
 
         const data: any = snap.data();
+
+        const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+
         let mems = (data.members || [])
           .map((m: any) => {
             const rid: RoleId | undefined = m.role?.id;
@@ -2122,7 +2164,7 @@ export const GamePlayTeamScreen = () => {
 
         const singer = mems[idx];
         if (!singer) return;
-
+        if (!(singer.team === 'A' || singer.team === 'B')) return;
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
 
@@ -2132,10 +2174,9 @@ export const GamePlayTeamScreen = () => {
 
         const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A ?? 0, B: teamScoresTx.B ?? 0 };
 
-        const teamBuffsTx = data.teamBuffs || { A: {}, B: {} };
         const serial = data.turnSerial ?? 0;
 
-        // Seal check (disable passive/skill/ult effects this turn)
+        // Seal check (disable passive/skill/ult effects this turn) — only singer team
         const sealedThisTurn = (teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0;
 
         // Neg mitigation check for this team turn (from IRONWALL SKILL/ULT)
@@ -2866,7 +2907,7 @@ export const GamePlayTeamScreen = () => {
                     : 'bg-white/5 border border-white/10 text-white/30 cursor-not-allowed'
                 }`}
               >
-                SKILL ({currentSinger?.role?.skillUses ?? 0})
+                SKILL ({skillUsesLeft})
               </button>
 
               <button
@@ -2878,7 +2919,7 @@ export const GamePlayTeamScreen = () => {
                     : 'bg-white/5 border border-white/10 text-white/30 cursor-not-allowed'
                 }`}
               >
-                ULT ({currentSinger?.role?.ultUses ?? 0})
+                ULT ({ultUsesLeft})
               </button>
 
               {sealedThisTurnClient && (

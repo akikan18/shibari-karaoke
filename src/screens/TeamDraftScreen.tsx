@@ -6,7 +6,7 @@ import { db } from '../firebase';
 import { useWakeLock } from '../hooks/useWakeLock';
 
 // --------------------
-// Role Definitions (Effect Text: ご指定の内容に差し替え)
+// Role Definitions (Updated)
 // --------------------
 type RoleDef = {
   id: string;
@@ -62,7 +62,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '⟁',
     passive: '自分のターンはお題3択。',
     skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
-    ult: 'ULT：—',
+    ult: 'ULT：(1回) 次のターンの相手チームのお題を全員分引き直す（3択：1番目は現在のお題）',
   },
   {
     id: 'mimic',
@@ -89,7 +89,7 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '☒',
     passive: '自分成功で敵チーム-300。',
     skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をリセットし、パッシブ/スキル/ウルトを無効化',
+    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をリセットしパッシブ、スキル、ウルトを無効化',
   },
   {
     id: 'underdog',
@@ -107,12 +107,12 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '🎲',
     passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（250刻み）。',
     skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル中はPASSIVEがマイナスでも0に止まる。',
-    ult: 'ULT：(1回) 表なら +4000 ／ 裏なら -1000。',
+    ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
   },
 ];
 
 // --------------------
-// ROLES (表示用: tone/descは既存維持、効果テキストだけROLE_DEFSで上書き)
+// ROLES (UI Meta)
 // --------------------
 const ROLE_UI_META = [
   {
@@ -679,7 +679,7 @@ export const TeamDraftScreen = () => {
             })}
           </div>
         </div>
-      
+       
 </div>
 
       {/* --- MODALS --- */}
@@ -957,13 +957,13 @@ const RoleDetailModal = ({ role, onClose, onSelect, canPick, isTaken, isBusy }: 
             onClick={onSelect}
             disabled={!canPick || isTaken || isBusy}
             className={`w-full py-3.5 rounded-xl font-black text-sm tracking-[0.2em] transition-all flex items-center justify-center gap-2
-                            ${
-                              isTaken
-                                ? 'bg-white/5 text-white/20 cursor-not-allowed'
-                                : !canPick
-                                ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                                : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] shadow-lg'
-                            }
+                          ${
+                            isTaken
+                              ? 'bg-white/5 text-white/20 cursor-not-allowed'
+                              : !canPick
+                              ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] shadow-lg'
+                          }
                         `}
           >
             {isBusy ? (
