@@ -254,6 +254,62 @@ const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => 
   );
 };
 
+/**
+ * ✅ 画面内に「必ず収まる」ための自動フィット（縮小）コンテナ
+ * - main領域の高さ/幅に対し、子要素の実測サイズを見て scale を調整
+ */
+const FitToContainer = ({ children, className }: { children: React.ReactNode; className?: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const calc = () => {
+      const c = container.getBoundingClientRect();
+      const b = content.getBoundingClientRect();
+
+      if (c.width <= 0 || c.height <= 0 || b.width <= 0 || b.height <= 0) {
+        setScale(1);
+        return;
+      }
+
+      const sx = c.width / b.width;
+      const sy = c.height / b.height;
+      const next = Math.min(1, sx, sy);
+
+      // 極端に小さくなりすぎるのを防ぐ（必要なら下限を変えてOK）
+      setScale(Math.max(0.55, next));
+    };
+
+    calc();
+    const ro = new ResizeObserver(() => calc());
+    ro.observe(container);
+    ro.observe(content);
+    window.addEventListener('resize', calc);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', calc);
+    };
+  }, [children]);
+
+  return (
+    <div ref={containerRef} className={`w-full h-full flex items-center justify-center ${className || ''}`}>
+      <div
+        ref={contentRef}
+        style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
+        className="w-full flex items-center justify-center"
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
+
 const MissionDisplay = React.memo(
   ({ title, criteria, eventData, isLocked, partnerName, stateText }: any) => {
     const displayTitle = stateText || title;
@@ -261,32 +317,32 @@ const MissionDisplay = React.memo(
 
     const getTitleStyle = (text: string) => {
       const len = text.length;
-      if (len > 50) return 'text-[clamp(0.9rem,3.5vw,1.5rem)]';
-      if (len > 30) return 'text-[clamp(1.1rem,4.5vw,2rem)]';
-      if (len > 15) return 'text-[clamp(1.4rem,6vw,3rem)]';
-      return 'text-[clamp(2rem,8vw,5rem)]';
+      if (len > 50) return 'text-[clamp(0.9rem,3.2vw,1.4rem)]';
+      if (len > 30) return 'text-[clamp(1.05rem,3.8vw,1.9rem)]';
+      if (len > 15) return 'text-[clamp(1.3rem,5vw,2.7rem)]';
+      return 'text-[clamp(1.8rem,7vw,4.2rem)]';
     };
 
     return (
       <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
+        initial={{ scale: 0.98, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 1.1, opacity: 0 }}
-        transition={{ type: 'spring', duration: 0.5 }}
-        className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-1 md:gap-4 text-center px-2"
+        exit={{ scale: 1.02, opacity: 0 }}
+        transition={{ type: 'spring', duration: 0.45 }}
+        className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-1 md:gap-3 text-center px-2"
       >
         {eventData && (
           <motion.div
-            initial={{ y: -20, opacity: 0, scale: 1.2 }}
+            initial={{ y: -10, opacity: 0, scale: 1.05 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
             className="w-full mb-1 flex flex-col items-center justify-center relative"
           >
-            <div className={`absolute inset-0 blur-xl opacity-40 bg-gradient-to-r ${eventData.bgGradient} rounded-full`} />
+            <div className={`absolute inset-0 blur-xl opacity-35 bg-gradient-to-r ${eventData.bgGradient} rounded-full`} />
             <motion.div
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ repeat: Infinity, duration: 2 }}
+              animate={{ scale: [1, 1.03, 1] }}
+              transition={{ repeat: Infinity, duration: 2.2 }}
               className="relative z-10 px-4 py-1 border-y border-white/20 bg-black/60 backdrop-blur-md"
-              style={{ boxShadow: `0 0 20px ${eventData.shadow}` }}
+              style={{ boxShadow: `0 0 18px ${eventData.shadow}` }}
             >
               <p className="text-[8px] font-mono tracking-[0.3em] text-white font-bold">EVENT</p>
               <h2
@@ -315,7 +371,7 @@ const MissionDisplay = React.memo(
           <div className="w-full px-1">
             <h1
               className={`
-              font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.4)] leading-tight w-full 
+              font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.35)] leading-tight w-full 
               whitespace-pre-wrap break-words text-center [text-wrap:balance] 
               ${getTitleStyle(displayTitle)}
             `}
@@ -325,12 +381,12 @@ const MissionDisplay = React.memo(
           </div>
         </div>
 
-        <div className="w-full flex justify-center mt-2 md:mt-4">
-          <div className="w-auto max-w-full bg-gradient-to-br from-red-900/40 to-black/40 border border-red-500/50 px-4 py-2 md:px-10 md:py-6 rounded-xl backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)] flex flex-col items-center gap-0.5">
+        <div className="w-full flex justify-center mt-2 md:mt-3">
+          <div className="w-auto max-w-full bg-gradient-to-br from-red-900/40 to-black/40 border border-red-500/50 px-4 py-2 md:px-8 md:py-5 rounded-xl backdrop-blur-md shadow-[0_0_25px_rgba(220,38,38,0.18)] flex flex-col items-center gap-0.5">
             <p className="text-red-300 font-mono tracking-[0.2em] text-[8px] md:text-xs uppercase opacity-90 font-bold whitespace-nowrap">
               Clear Condition
             </p>
-            <p className="font-black text-white tracking-widest text-[clamp(1.5rem,4vw,3rem)] md:text-[3rem]">
+            <p className="font-black text-white tracking-widest text-[clamp(1.2rem,3.5vw,2.6rem)] md:text-[2.8rem]">
               {displayCriteria}
             </p>
           </div>
@@ -423,6 +479,63 @@ const JackpotOverlay = ({ targetValue, onComplete }: { targetValue: number; onCo
   );
 };
 
+// ログ閲覧モーダル（個人戦用）
+const LogModal = ({ isOpen, onClose, logs }: { isOpen: boolean; onClose: () => void; logs: any[] }) => {
+  if (!isOpen) return null;
+
+  const sorted = [...(logs || [])].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  return (
+    <div className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" onClick={onClose}>
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[#0f172a] border border-white/10 w-full max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+      >
+        <div className="p-4 md:p-6 border-b border-white/10 flex justify-between items-center bg-black/40">
+          <h2 className="text-xl md:text-2xl font-black text-white tracking-widest italic flex items-center gap-2">
+            📜 GAME LOG
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6">
+          {sorted.length === 0 ? (
+            <div className="text-center text-gray-400 font-mono text-sm py-10">No logs yet.</div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {sorted.map((l, idx) => {
+                const time = l.timestamp ? new Date(l.timestamp).toLocaleString() : '';
+                const lines = l.detail ? String(l.detail).split('\n') : [];
+                return (
+                  <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-black text-white">{l.title || 'LOG'}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{time}</div>
+                    </div>
+                    <div className="mt-2 flex flex-col gap-1">
+                      {lines.map((line: string, i: number) => (
+                        <div key={i} className="text-xs md:text-sm text-gray-200 font-mono break-words">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- Main Component ---
 
 export const GamePlayScreen = () => {
@@ -440,6 +553,7 @@ export const GamePlayScreen = () => {
   const [turnCount, setTurnCount] = useState(1);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showLogModal, setShowLogModal] = useState(false);
   const [roomData, setRoomData] = useState<any>(null);
 
   const [showJackpot, setShowJackpot] = useState(false);
@@ -447,6 +561,9 @@ export const GamePlayScreen = () => {
   const [jackpotResultType, setJackpotResultType] = useState<'CLEAR' | 'FAILED'>('CLEAR');
 
   const [proxyTarget, setProxyTarget] = useState<any>(null);
+
+  // 予約選択：本人がボタンで開く
+  const [selfActionModal, setSelfActionModal] = useState<null | { type: 'MISSION' | 'PARTNER' }>(null);
 
   const mobileListRef = useRef<HTMLDivElement>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -459,8 +576,6 @@ export const GamePlayScreen = () => {
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   const [activeActionLog, setActiveActionLog] = useState<any>(null);
-
-  // ★ lastLogTimestamp は ref で管理（onSnapshotの再購読ループ回避）
   const lastLogTimestampRef = useRef<number>(0);
 
   // 順位計算
@@ -525,9 +640,7 @@ export const GamePlayScreen = () => {
 
   useEffect(() => {
     if (isTransitioning) {
-      const timer = setTimeout(() => {
-        setIsTransitioning(false);
-      }, 800);
+      const timer = setTimeout(() => setIsTransitioning(false), 800);
       return () => clearTimeout(timer);
     }
   }, [isTransitioning]);
@@ -550,6 +663,115 @@ export const GamePlayScreen = () => {
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
       },
     });
+  };
+
+  // --- Deck helpers ---
+  const ensureDeck = (deck: any[], pool: any[]) => {
+    if (Array.isArray(deck) && deck.length > 0) return [...deck];
+    return shuffleArray(pool || []);
+  };
+
+  const drawOneFromDeck = (deck: any[], pool: any[]) => {
+    let d = ensureDeck(deck, pool);
+    const item = d.pop();a
+    d = ensureDeck(d, pool);
+    return { deck: d, item };
+  };
+
+  const buildDestinyCandidates = (main: any, pool: any[]) => {
+    const otherPool = (pool || []).filter((c: any) => c?.title && c.title !== main?.title);
+    const shuffled = shuffleArray(otherPool);
+    const sub1 = shuffled[0];
+    const sub2 = shuffled[1];
+    return shuffleArray([main, sub1, sub2].filter(Boolean));
+  };
+
+  /**
+   * ✅ 予約イベントが「eventだけ付いていて candidates/selectingPartner が未生成」のとき
+   * ボタン押下でその場で生成して、本人/ホストが即選択できるようにする。
+   */
+  const prepareSelectionDataIfNeeded = async (
+    memberId: string,
+    kind: 'MISSION' | 'PARTNER'
+  ): Promise<{ updatedMember: any | null }> => {
+    if (!roomId) return { updatedMember: null };
+    if (!roomData?.themePool || roomData.themePool.length === 0) {
+      addToast('エラー：お題データなし');
+      return { updatedMember: null };
+    }
+
+    const prevMembers = members;
+    const newMembers = [...members];
+    const idx = newMembers.findIndex((m) => m.id === memberId);
+    if (idx === -1) return { updatedMember: null };
+
+    const target = { ...newMembers[idx] };
+
+    // deckは共有資源なので、ここで消費して反映する
+    let deck = Array.isArray(roomData?.deck) ? [...roomData.deck] : [];
+    const pool = roomData.themePool;
+
+    // DESTINY CHOICE：candidatesが無いなら生成する
+    if (kind === 'MISSION') {
+      const needsCandidates =
+        target.event === EVENT_TYPES.SELECTION &&
+        (!Array.isArray(target.candidates) || target.candidates.length === 0);
+
+      if (needsCandidates) {
+        const { deck: nextDeck, item: main } = drawOneFromDeck(deck, pool);
+        deck = nextDeck;
+
+        if (!main) {
+          addToast('エラー：お題が取得できません');
+          return { updatedMember: null };
+        }
+
+        target.challenge = main;
+        target.candidates = buildDestinyCandidates(main, pool);
+      }
+    }
+
+    // DUET：selectingPartnerが無いなら生成する（challengeも無いなら引く）
+    if (kind === 'PARTNER') {
+      const needsPartnerFlag =
+        target.event === EVENT_TYPES.DUET &&
+        !target.selectingPartner &&
+        !target.duetPartnerId;
+
+      if (needsPartnerFlag) {
+        if (!target.challenge) {
+          const { deck: nextDeck, item: nextChallenge } = drawOneFromDeck(deck, pool);
+          deck = nextDeck;
+          target.challenge = nextChallenge;
+        }
+        target.selectingPartner = true;
+      }
+    }
+
+    // 何も変わらないなら終了
+    const changed =
+      target.challenge !== newMembers[idx].challenge ||
+      target.selectingPartner !== newMembers[idx].selectingPartner ||
+      JSON.stringify(target.candidates || []) !== JSON.stringify(newMembers[idx].candidates || []);
+
+    if (!changed) return { updatedMember: target };
+
+    newMembers[idx] = target;
+
+    // optimistic
+    setMembers(newMembers);
+    setRoomData((prev: any) => ({ ...(prev || {}), deck }));
+
+    try {
+      await updateDoc(doc(db, 'rooms', roomId), { members: newMembers, deck });
+      return { updatedMember: target };
+    } catch (e) {
+      console.error(e);
+      addToast('通信エラーが発生しました');
+      // rollback
+      setMembers(prevMembers);
+      return { updatedMember: null };
+    }
   };
 
   const handlePlayerSelectedWrapper = (
@@ -584,8 +806,6 @@ export const GamePlayScreen = () => {
       setIsTransitioning(false);
       const newMembers = [...members];
       newMembers[safeIndex] = { ...newMembers[safeIndex], selectingTarget: true };
-
-      // ★ 追加：すぐUI反映
       setMembers(newMembers);
 
       try {
@@ -625,20 +845,23 @@ export const GamePlayScreen = () => {
     await updateDoc(doc(db, 'rooms', roomId), { jackpotState: null });
   };
 
+  /**
+   * 予約選択が「その人のターンまで効かない」問題の根本：
+   * - currentTurnIndex を更新対象にしてしまうと、"今歌ってる人"が更新される。
+   * - 基本は userId を更新対象にし、プロキシは targetUserId を明示する。
+   */
+  const resolveActorIndex = (newMembers: any[], targetUserId: string | null) => {
+    if (targetUserId) return newMembers.findIndex((m) => m.id === targetUserId);
+    return newMembers.findIndex((m) => m.id === userId);
+  };
+
   const handlePlayerSelected = async (selectedUserId: string, mode: 'TARGET' | 'DUET', targetUserId: string | null = null) => {
-    const prevMembers = members; // ★ rollback 用
+    const prevMembers = members;
     const prevProxy = proxyTarget;
+    const prevSelfModal = selfActionModal;
 
     const newMembers = [...members];
-    let actorIndex = -1;
-
-    // 更新対象（Actor）の特定ロジック
-    if (targetUserId) {
-      actorIndex = newMembers.findIndex((m) => m.id === targetUserId);
-    } else {
-      actorIndex = Math.min(currentTurnIndex, newMembers.length - 1);
-    }
-
+    const actorIndex = resolveActorIndex(newMembers, targetUserId);
     if (actorIndex === -1 || !newMembers[actorIndex]) return;
 
     if (mode === 'TARGET') {
@@ -650,24 +873,22 @@ export const GamePlayScreen = () => {
     if (mode === 'DUET') {
       const updatedMember = { ...newMembers[actorIndex] };
       updatedMember.duetPartnerId = selectedUserId;
-
-      // ★ 必ず消す
       delete updatedMember.selectingPartner;
 
       newMembers[actorIndex] = updatedMember;
 
-      // ★ 楽観的更新：すぐ閉じる（固まり防止）
       setMembers(newMembers);
       setProxyTarget(null);
+      setSelfActionModal(null);
 
       try {
         await updateDoc(doc(db, 'rooms', roomId), { members: newMembers });
       } catch (e) {
         console.error(e);
         addToast('通信エラーが発生しました');
-        // rollback
         setMembers(prevMembers);
         setProxyTarget(prevProxy);
+        setSelfActionModal(prevSelfModal);
       }
     }
   };
@@ -675,40 +896,32 @@ export const GamePlayScreen = () => {
   const handleMissionSelected = async (selectedChallenge: any, targetUserId: string | null = null) => {
     if (members.length === 0) return;
 
-    const prevMembers = members; // ★ rollback 用
+    const prevMembers = members;
     const prevProxy = proxyTarget;
+    const prevSelfModal = selfActionModal;
 
     const newMembers = [...members];
-    let actorIndex = -1;
+    const actorIndex = resolveActorIndex(newMembers, targetUserId);
+    if (actorIndex === -1 || !newMembers[actorIndex]) return;
 
-    if (targetUserId) {
-      actorIndex = newMembers.findIndex((m) => m.id === targetUserId);
-    } else {
-      actorIndex = Math.min(currentTurnIndex, newMembers.length - 1);
-    }
+    const updatedMember = { ...newMembers[actorIndex] };
+    updatedMember.challenge = selectedChallenge;
+    delete updatedMember.candidates;
 
-    if (actorIndex !== -1 && newMembers[actorIndex]) {
-      const updatedMember = { ...newMembers[actorIndex] };
-      updatedMember.challenge = selectedChallenge;
+    newMembers[actorIndex] = updatedMember;
 
-      // ★ 必ず消す
-      delete updatedMember.candidates;
+    setMembers(newMembers);
+    setProxyTarget(null);
+    setSelfActionModal(null);
 
-      newMembers[actorIndex] = updatedMember;
-
-      // ★ 楽観的更新：すぐUIを閉じる（固まり防止）
-      setMembers(newMembers);
-      setProxyTarget(null);
-
-      try {
-        await updateDoc(doc(db, 'rooms', roomId), { members: newMembers });
-      } catch (error) {
-        console.error(error);
-        addToast('選択エラー');
-        // rollback
-        setMembers(prevMembers);
-        setProxyTarget(prevProxy);
-      }
+    try {
+      await updateDoc(doc(db, 'rooms', roomId), { members: newMembers });
+    } catch (error) {
+      console.error(error);
+      addToast('選択エラー');
+      setMembers(prevMembers);
+      setProxyTarget(prevProxy);
+      setSelfActionModal(prevSelfModal);
     }
   };
 
@@ -721,14 +934,16 @@ export const GamePlayScreen = () => {
     if (!currentPlayer) return;
 
     const eventType = currentPlayer.event;
-    const scoreChanges: { name: string; diff: number }[] = [];
+
+    const scoreChanges: { name: string; before: number; after: number; diff: number }[] = [];
     let logTitle = '';
 
     const applyScoreChange = (memberIndex: number, amount: number) => {
       if (newMembers[memberIndex]) {
-        const currentVal = newMembers[memberIndex].score || 0;
-        newMembers[memberIndex].score = currentVal + amount;
-        scoreChanges.push({ name: newMembers[memberIndex].name, diff: amount });
+        const before = newMembers[memberIndex].score || 0;
+        const after = before + amount;
+        newMembers[memberIndex].score = after;
+        scoreChanges.push({ name: newMembers[memberIndex].name, before, after, diff: amount });
       }
     };
 
@@ -806,7 +1021,8 @@ export const GamePlayScreen = () => {
         applyScoreChange(myIndex, jackpotAmount || 0);
       } else {
         logTitle = 'MISSION FAILED';
-        scoreChanges.push({ name: currentPlayer.name, diff: 0 });
+        const before = currentPlayer.score || 0;
+        scoreChanges.push({ name: currentPlayer.name, before, after: before, diff: 0 });
       }
     }
 
@@ -814,14 +1030,15 @@ export const GamePlayScreen = () => {
       scoreChanges.length > 0
         ? scoreChanges
             .map((c) => {
-              const sign = c.diff > 0 ? '+' : '';
-              const valStr = c.diff === 0 ? 'No Change' : `${sign}${c.diff}`;
-              return `${c.name}: ${valStr}`;
+              const diffStr = c.diff === 0 ? 'No Change' : `${c.diff > 0 ? '+' : ''}${c.diff.toLocaleString()}`;
+              return `${c.name}: ${c.before.toLocaleString()} → ${c.after.toLocaleString()} (${diffStr})`;
             })
             .join('\n')
         : 'No Score Change';
 
-    // リセット
+    const newLog = { timestamp: Date.now(), title: logTitle, detail: logDetail };
+
+    // リセット（このプレイヤーの「今回のターン処理」終わり）
     delete currentPlayer.event;
     delete currentPlayer.candidates;
     delete currentPlayer.selectingTarget;
@@ -839,23 +1056,22 @@ export const GamePlayScreen = () => {
     const refillDeck = (deck: any[]) => (deck.length === 0 ? shuffleArray(currentPool) : deck);
     currentDeck = refillDeck(currentDeck);
 
+    // 次の周回でこの人に付くイベント（＝予約）
     const nextLoopEvent = rollEvent();
     if (nextLoopEvent) currentPlayer.event = nextLoopEvent;
 
+    // 予約イベントの内容更新（ここでは従来通り「即生成」）
     if (nextLoopEvent === EVENT_TYPES.SELECTION) {
       const mainChallenge = currentDeck.pop();
       currentDeck = refillDeck(currentDeck);
 
-      const remainingDeckTitles = new Set(currentDeck.map((c: any) => c.title));
-      let availablePool = currentPool.filter((c: any) => c.title !== mainChallenge.title && !remainingDeckTitles.has(c.title));
-      if (availablePool.length < 2) availablePool = currentPool.filter((c: any) => c.title !== mainChallenge.title);
-
-      const tempDeck = shuffleArray(availablePool);
-      const subChallenge1 = tempDeck.pop();
-      const subChallenge2 = tempDeck.pop();
+      if (!mainChallenge) {
+        addToast('エラー：お題が取得できません');
+        return;
+      }
 
       currentPlayer.challenge = mainChallenge;
-      currentPlayer.candidates = shuffleArray([mainChallenge, subChallenge1, subChallenge2]);
+      currentPlayer.candidates = buildDestinyCandidates(mainChallenge, currentPool);
     } else if (nextLoopEvent === EVENT_TYPES.DUET) {
       const nextChallenge = currentDeck.pop();
       currentPlayer.challenge = nextChallenge;
@@ -865,7 +1081,7 @@ export const GamePlayScreen = () => {
       currentPlayer.challenge = nextChallenge;
     }
 
-    // ★ 壊れていた let を修正
+    // 次の歌う人へ
     let nextIndex = (safeIndex + 1) % newMembers.length;
     const nextPlayer = newMembers[nextIndex];
     const isSelecting = nextPlayer?.candidates || nextPlayer?.selectingPartner;
@@ -874,6 +1090,10 @@ export const GamePlayScreen = () => {
       nextPlayer.challenge = fallbackChallenge;
     }
 
+    // logs 履歴（最大50件）
+    const prevLogs = Array.isArray(roomData?.logs) ? roomData.logs : [];
+    const nextLogs = [...prevLogs, newLog].slice(-50);
+
     try {
       const roomRef = doc(db, 'rooms', roomId);
       await updateDoc(roomRef, {
@@ -881,7 +1101,8 @@ export const GamePlayScreen = () => {
         currentTurnIndex: nextIndex,
         turnCount: turnCount + 1,
         deck: currentDeck,
-        lastLog: { timestamp: Date.now(), title: logTitle, detail: logDetail },
+        lastLog: newLog,
+        logs: nextLogs,
       });
     } catch (error) {
       console.error('Error:', error);
@@ -919,7 +1140,6 @@ export const GamePlayScreen = () => {
   const currentPlayerMember = members[safeCurrentIndex] || members[0];
   const currentPlayer = rankedMembers.find((m) => m.id === currentPlayerMember.id) || currentPlayerMember;
 
-  // ✅ 追加：白画面の原因だった isMyTurn を定義
   const isMyTurn = currentPlayer?.id === userId;
 
   const currentChallenge = currentPlayer.challenge || { title: 'お題準備中...', criteria: '...' };
@@ -931,17 +1151,27 @@ export const GamePlayScreen = () => {
 
   const myMember = members.find((m) => m.id === userId);
 
-  const isSelectingMission =
-    (myMember?.candidates && myMember.candidates.length > 0) ||
+  // 🔥「イベントは出てるが候補未生成」も「選択待ち」として扱う
+  const isPendingMission = (m: any) =>
+    m?.event === EVENT_TYPES.SELECTION && (!Array.isArray(m?.candidates) || m.candidates.length === 0);
+
+  const isPendingPartner = (m: any) =>
+    m?.event === EVENT_TYPES.DUET && !m?.selectingPartner && !m?.duetPartnerId;
+
+  // 自分の予約：いつでもボタンで開ける（ホスト含む）
+  const hasMyPendingMission = !!(myMember && (myMember.candidates?.length > 0 || isPendingMission(myMember)));
+  const hasMyPendingPartner = !!(myMember && (myMember.selectingPartner || isPendingPartner(myMember)));
+
+  // ターン中の自動選択UI（従来通り）
+  const shouldShowMissionSelectionUI =
+    (isMyTurn && myMember?.candidates && myMember.candidates.length > 0) ||
     (isHost && currentPlayer.candidates && currentPlayer.candidates.length > 0 && currentPlayer.id !== userId);
 
-  const isSelectingMyPartner =
-    myMember?.selectingPartner || (isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId);
+  const shouldShowPartnerSelectionUI =
+    (isMyTurn && myMember?.selectingPartner) ||
+    (isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId);
 
   const isSelectingTarget = canSelect && currentPlayer.selectingTarget;
-
-  const displayCandidates =
-    isHost && currentPlayer.candidates?.length > 0 && currentPlayer.id !== userId ? currentPlayer.candidates : myMember?.candidates;
 
   const isAnyoneSelectingMission = currentPlayer.candidates && currentPlayer.candidates.length > 0;
   const isAnyoneSelectingTarget = currentPlayer.selectingTarget;
@@ -949,7 +1179,9 @@ export const GamePlayScreen = () => {
     (currentEventKey === EVENT_TYPES.DUET && !currentPlayer.duetPartnerId) || currentPlayer.selectingPartner;
 
   const isEventSelectionWithoutCandidates =
-    currentEventKey === EVENT_TYPES.SELECTION && (!currentPlayer.candidates || currentPlayer.candidates.length === 0) && !currentPlayer.challenge;
+    currentEventKey === EVENT_TYPES.SELECTION &&
+    (!currentPlayer.candidates || currentPlayer.candidates.length === 0) &&
+    !currentPlayer.challenge;
 
   const isEventDuetWithoutPartner =
     currentEventKey === EVENT_TYPES.DUET && !currentPlayer.duetPartnerId && !currentPlayer.selectingPartner;
@@ -977,6 +1209,37 @@ export const GamePlayScreen = () => {
 
   const reorderedMembers = [...rankedMembers.slice(safeCurrentIndex), ...rankedMembers.slice(0, safeCurrentIndex)];
   const isButtonsDisabled = !!activeActionLog;
+
+  const openMyMissionModal = async () => {
+    if (!myMember) return;
+    if (isPendingMission(myMember)) {
+      await prepareSelectionDataIfNeeded(userId, 'MISSION');
+    }
+    setSelfActionModal({ type: 'MISSION' });
+  };
+
+  const openMyPartnerModal = async () => {
+    if (!myMember) return;
+    if (isPendingPartner(myMember)) {
+      await prepareSelectionDataIfNeeded(userId, 'PARTNER');
+    }
+    setSelfActionModal({ type: 'PARTNER' });
+  };
+
+  const openProxyForMember = async (m: any) => {
+    // proxy表示に必要なデータが無ければ先に生成
+    if (m?.event === EVENT_TYPES.SELECTION && (!m?.candidates || m.candidates.length === 0)) {
+      const r = await prepareSelectionDataIfNeeded(m.id, 'MISSION');
+      if (r.updatedMember) setProxyTarget(r.updatedMember);
+      return;
+    }
+    if (m?.event === EVENT_TYPES.DUET && !m?.selectingPartner && !m?.duetPartnerId) {
+      const r = await prepareSelectionDataIfNeeded(m.id, 'PARTNER');
+      if (r.updatedMember) setProxyTarget(r.updatedMember);
+      return;
+    }
+    setProxyTarget(m);
+  };
 
   return (
     <div className="w-full h-[100dvh] text-white overflow-hidden flex flex-col md:flex-row relative bg-[#0f172a]">
@@ -1006,6 +1269,108 @@ export const GamePlayScreen = () => {
       />
 
       <EventGuideModal isOpen={showGuideModal} onClose={() => setShowGuideModal(false)} />
+      <LogModal isOpen={showLogModal} onClose={() => setShowLogModal(false)} logs={roomData?.logs || []} />
+
+      {/* ★自分の予約選択モーダル（ターン外でも開ける） */}
+      <AnimatePresence>
+        {selfActionModal && (
+          <div className="fixed inset-0 z-[165] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+              onClick={() => setSelfActionModal(null)}
+            />
+
+            {/* 自分の DESTINY CHOICE */}
+            {selfActionModal.type === 'MISSION' && myMember?.candidates?.length > 0 && (
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative z-[170] w-full max-w-4xl flex flex-col items-center gap-2 md:gap-4 h-full md:justify-center pointer-events-auto"
+              >
+                <div className="flex-none text-center">
+                  <h2 className="text-2xl md:text-5xl font-black text-yellow-400 italic tracking-tighter drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]">
+                    DESTINY CHOICE
+                  </h2>
+                  <p className="text-yellow-200 font-bold text-sm tracking-widest mt-1 uppercase">YOUR CHOICE</p>
+                </div>
+
+                <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
+                  <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
+                    {myMember.candidates.map((cand: any, idx: number) => (
+                      <motion.button
+                        key={idx}
+                        whileHover={{ scale: 1.05, borderColor: '#facc15' }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleMissionSelectedWrapper(cand, userId)}
+                        className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0"
+                      >
+                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">
+                          OPTION {idx + 1}
+                        </div>
+                        <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cand.title}</h3>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cand.criteria}</p>
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSelfActionModal(null)}
+                  className="mt-2 px-8 py-2 rounded-lg border border-white/20 hover:bg-white/10 text-gray-400 font-bold text-xs tracking-widest"
+                >
+                  CLOSE
+                </button>
+              </motion.div>
+            )}
+
+            {/* 自分の DUET（予約） */}
+            {selfActionModal.type === 'PARTNER' && myMember?.selectingPartner && (
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative z-[170] w-full max-w-lg bg-black/80 border border-cyan-500 rounded-2xl md:p-6 shadow-[0_0_50px_rgba(6,182,212,0.4)] flex flex-col h-[80vh] md:h-auto overflow-hidden pointer-events-auto"
+              >
+                <div className="flex-none p-4 pb-0 md:p-0 text-center md:mb-4">
+                  <h2 className="text-xl md:text-2xl font-black text-cyan-400 tracking-widest italic">DUET CHANCE</h2>
+                  <p className="text-cyan-200 font-bold text-xs tracking-widest mt-1 uppercase">YOUR CHOICE</p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-0 min-h-0">
+                  <div className="grid grid-cols-2 gap-2 md:gap-3">
+                    {members
+                      .filter((m) => m.id !== userId)
+                      .map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => handlePlayerSelectedWrapper(m.id, 'DUET', userId)}
+                          className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-cyan-900/50 hover:border-cyan-500 transition-all flex flex-col items-center gap-1 md:gap-2 group"
+                        >
+                          <div className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">{m.avatar}</div>
+                          <div className="font-bold text-white text-xs md:text-sm truncate w-full text-center">{m.name}</div>
+                          <div className="text-cyan-300 font-mono text-[10px] md:text-xs">{(m.score || 0).toLocaleString()} pt</div>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="flex-none p-4 pt-2 md:p-0 md:pt-4 text-center">
+                  <button
+                    onClick={() => setSelfActionModal(null)}
+                    className="px-8 py-2 rounded-lg border border-white/20 hover:bg-white/10 text-gray-400 font-bold text-xs tracking-widest"
+                  >
+                    CLOSE
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ★代理操作モーダル */}
       <AnimatePresence>
@@ -1094,7 +1459,8 @@ export const GamePlayScreen = () => {
                   </div>
                 </div>
 
-                <div className="flex-none p-4 pt-2 md:p-0 md:pt-4 text-center">
+               
+ <div className="flex-none p-4 pt-2 md:p-0 md:pt-4 text-center">
                   <button
                     onClick={() => setProxyTarget(null)}
                     className="px-8 py-2 rounded-lg border border-white/20 hover:bg-white/10 text-gray-400 font-bold text-xs tracking-widest"
@@ -1136,6 +1502,36 @@ export const GamePlayScreen = () => {
           </div>
 
           <div className="flex items-center gap-2 md:gap-4 flex-none">
+            {/* ✅ イベント発生者本人（ホスト含む）がいつでも選べるボタン */}
+            {(hasMyPendingMission || hasMyPendingPartner) && (
+              <div className="flex items-center gap-2">
+                {hasMyPendingMission && (
+                  <button
+                    onClick={openMyMissionModal}
+                    className="h-8 md:h-10 px-3 md:px-4 rounded-full bg-yellow-500/20 border border-yellow-400 text-yellow-300 font-black text-[10px] md:text-xs tracking-widest animate-pulse hover:bg-yellow-500/30"
+                  >
+                    ★ MY DESTINY
+                  </button>
+                )}
+                {hasMyPendingPartner && (
+                  <button
+                    onClick={openMyPartnerModal}
+                    className="h-8 md:h-10 px-3 md:px-4 rounded-full bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-black text-[10px] md:text-xs tracking-widest animate-pulse hover:bg-cyan-500/30"
+                  >
+                    ★ MY DUET
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowLogModal(true)}
+              className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-all active:scale-95"
+              title="LOG"
+            >
+              📜
+            </button>
+
             <button
               onClick={() => setShowGuideModal(true)}
               className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-cyan-400 hover:bg-cyan-900/30 hover:border-cyan-500 transition-all active:scale-95 group"
@@ -1175,12 +1571,12 @@ export const GamePlayScreen = () => {
           </div>
 
           <AnimatePresence mode="wait">
-            {isSelectingMission && displayCandidates ? (
+            {shouldShowMissionSelectionUI ? (
               <motion.div
                 key="selection-ui"
-                initial={{ opacity: 0, scale: 0.9 }}
+                initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.1 }}
+                exit={{ opacity: 0, scale: 1.02 }}
                 className="relative z-20 w-full max-w-4xl flex flex-col items-center gap-2 md:gap-4 h-full md:justify-center"
               >
                 <div className="flex-none text-center pt-2 md:pt-0">
@@ -1198,30 +1594,39 @@ export const GamePlayScreen = () => {
 
                 <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
                   <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                    {displayCandidates.map((cand: any, idx: number) => (
-                      <motion.button
-                        key={idx}
-                        whileHover={{ scale: 1.05, borderColor: '#facc15' }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => handleMissionSelectedWrapper(cand)}
-                        className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0"
-                      >
-                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">
-                          OPTION {idx + 1}
-                        </div>
-                        <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cand.title}</h3>
-                        <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cand.criteria}</p>
-                      </motion.button>
-                    ))}
+                    {(isHost && currentPlayer.candidates?.length > 0 && currentPlayer.id !== userId
+                      ? currentPlayer.candidates
+                      : myMember?.candidates
+                    )?.map((cand: any, idx: number) => {
+                      const actorId =
+                        isHost && currentPlayer.candidates?.length > 0 && currentPlayer.id !== userId
+                          ? currentPlayer.id
+                          : userId;
+                      return (
+                        <motion.button
+                          key={idx}
+                          whileHover={{ scale: 1.05, borderColor: '#facc15' }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleMissionSelectedWrapper(cand, actorId)}
+                          className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0"
+                        >
+                          <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">
+                            OPTION {idx + 1}
+                          </div>
+                          <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cand.title}</h3>
+                          <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cand.criteria}</p>
+                        </motion.button>
+                      );
+                    })}
                   </div>
                 </div>
               </motion.div>
-            ) : isSelectingMyPartner ? (
+            ) : shouldShowPartnerSelectionUI ? (
               <motion.div
                 key="duet-ui"
-                initial={{ opacity: 0, scale: 0.9 }}
+                initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.1 }}
+                exit={{ opacity: 0, scale: 1.02 }}
                 className="relative z-20 w-full max-w-lg bg-black/80 border border-cyan-500 rounded-2xl md:p-6 shadow-[0_0_50px_rgba(6,182,212,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden"
               >
                 <div className="flex-none p-4 pb-0 md:p-0 text-center md:mb-4">
@@ -1236,36 +1641,35 @@ export const GamePlayScreen = () => {
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-0 min-h-0">
                   <div className="grid grid-cols-2 gap-2 md:gap-3">
                     {members
-                      .filter(
-                        (m) =>
-                          m.id !==
-                          (isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId ? currentPlayer.id : userId)
-                      )
-                      .map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => handlePlayerSelectedWrapper(m.id, 'DUET')}
-                          className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-cyan-900/50 hover:border-cyan-500 transition-all flex flex-col items-center gap-1 md:gap-2 group"
-                        >
-                          <div className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">{m.avatar}</div>
-                          <div className="font-bold text-white text-xs md:text-sm truncate w-full text-center">{m.name}</div>
-                          <div className="text-cyan-300 font-mono text-[10px] md:text-xs">{(m.score || 0).toLocaleString()} pt</div>
-                        </button>
-                      ))}
+                      .filter((m) => m.id !== (isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId ? currentPlayer.id : userId))
+                      .map((m) => {
+                        const actorId =
+                          isHost && currentPlayer.selectingPartner && currentPlayer.id !== userId ? currentPlayer.id : userId;
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => handlePlayerSelectedWrapper(m.id, 'DUET', actorId)}
+                            className="p-2 md:p-4 rounded-xl bg-gray-900 border border-white/10 hover:bg-cyan-900/50 hover:border-cyan-500 transition-all flex flex-col items-center gap-1 md:gap-2 group"
+                          >
+                            <div className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">{m.avatar}</div>
+                            <div className="font-bold text-white text-xs md:text-sm truncate w-full text-center">{m.name}</div>
+                            <div className="text-cyan-300 font-mono text-[10px] md:text-xs">{(m.score || 0).toLocaleString()} pt</div>
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
               </motion.div>
             ) : isSelectingTarget ? (
               <motion.div
                 key="target-ui"
-                initial={{ opacity: 0, scale: 0.9 }}
+                initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.1 }}
+                exit={{ opacity: 0, scale: 1.02 }}
                 className="relative z-20 w-full max-w-lg bg-black/80 border border-emerald-500 rounded-2xl md:p-6 shadow-[0_0_50px_rgba(16,185,129,0.4)] flex flex-col h-full md:h-auto md:max-h-[80vh] overflow-hidden"
               >
                 <div className="flex-none p-4 pb-0 md:p-0 text-center md:mb-4">
                   <h2 className="text-xl md:text-2xl font-black text-emerald-400 tracking-widest italic">SELECT TARGET</h2>
-                  {/* ✅ isMyTurn 定義済みなので白画面にならない */}
                   {isHost && !isMyTurn && <p className="text-red-400 font-bold text-[9px] md:text-xs animate-pulse">HOST OVERRIDE</p>}
                   <p className="text-gray-300 text-[10px] md:text-xs font-mono mt-1">誰から1000ポイント奪いますか？</p>
                 </div>
@@ -1290,15 +1694,16 @@ export const GamePlayScreen = () => {
                 </div>
               </motion.div>
             ) : !isTransitioning ? (
-              <MissionDisplay
-                key={currentPlayer.id + turnCount}
-                title={currentChallenge.title}
-                criteria={currentChallenge.criteria}
-                eventData={currentEventData}
-                isLocked={isInteractionLocked}
-                partnerName={partnerName}
-                stateText={stateText}
-              />
+              <FitToContainer key={currentPlayer.id + turnCount} className="px-1">
+                <MissionDisplay
+                  title={currentChallenge.title}
+                  criteria={currentChallenge.criteria}
+                  eventData={currentEventData}
+                  isLocked={isInteractionLocked}
+                  partnerName={partnerName}
+                  stateText={stateText}
+                />
+              </FitToContainer>
             ) : null}
           </AnimatePresence>
         </div>
@@ -1392,9 +1797,14 @@ export const GamePlayScreen = () => {
               const isOfflineDisplay = isOffline && !isGuest;
               const evt = member.event ? GAME_EVENTS[member.event] : null;
 
-              const needsSelection = (member.candidates && member.candidates.length > 0) || member.selectingPartner;
-              const canProxy = isHost && isOffline && needsSelection;
-              const canGuestSelect = isHost && isGuest && needsSelection;
+              const needsSelection =
+                (member.candidates && member.candidates.length > 0) ||
+                member.selectingPartner ||
+                isPendingMission(member) ||
+                isPendingPartner(member);
+
+              const canProxy = isHost && needsSelection; // ✅ いつでも（オンラインでも）PROXY可能
+              const isSelfNeeds = member.id === userId && needsSelection;
 
               return (
                 <div
@@ -1403,12 +1813,22 @@ export const GamePlayScreen = () => {
                     isCurrent ? 'border-cyan-500 bg-cyan-900/20' : 'border-white/10'
                   } rounded-lg p-1.5 flex flex-col gap-0.5 relative overflow-hidden ${isOfflineDisplay ? 'grayscale opacity-70' : ''}`}
                 >
-                  {isCurrent && <div className="absolute top-0 right-0 bg-cyan-500 text-black text-[6px] font-bold px-1 py-0.5 rounded-bl">NOW</div>}
-                  {isGuest && <div className="absolute top-0 left-0 bg-purple-600 text-white text-[6px] font-bold px-1 py-0.5 rounded-br">GUEST</div>}
+                  {isCurrent && (
+                    <div className="absolute top-0 right-0 bg-cyan-500 text-black text-[6px] font-bold px-1 py-0.5 rounded-bl">
+                      NOW
+                    </div>
+                  )}
+                  {isGuest && (
+                    <div className="absolute top-0 left-0 bg-purple-600 text-white text-[6px] font-bold px-1 py-0.5 rounded-br">
+                      GUEST
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-1">
                     <div className="text-sm">{member.avatar}</div>
-                    <div className={`text-[9px] font-bold truncate flex-1 ${isCurrent ? 'text-white' : 'text-gray-400'}`}>{member.name}</div>
+                    <div className={`text-[9px] font-bold truncate flex-1 ${isCurrent ? 'text-white' : 'text-gray-400'}`}>
+                      {member.name}
+                    </div>
                   </div>
 
                   <div className="h-[1px] bg-white/10 w-full my-0.5" />
@@ -1429,34 +1849,32 @@ export const GamePlayScreen = () => {
                     ) : (
                       <div className="text-[6px] text-gray-600 truncate">-</div>
                     )}
-                    <div className="text-[7px] text-cyan-200 font-bold truncate leading-tight mt-0.5">{member.challenge?.title || '...'}</div>
+                    <div className="text-[7px] text-cyan-200 font-bold truncate leading-tight mt-0.5">
+                      {member.challenge?.title || '...'}
+                    </div>
                   </div>
 
-                  {isOfflineDisplay && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-[8px] text-red-500 font-bold backdrop-blur-[1px]">
-                      OFFLINE
-                    </div>
-                  )}
-
-                  {/* Real Proxy Button (Yellow) */}
-                  {canProxy && !canGuestSelect && (
+                  {/* ✅ 本人用ボタン（イベント発生者はターン関係なく選べる） */}
+                  {isSelfNeeds && !isCurrent && (
                     <button
-                      onClick={() => setProxyTarget(member)}
-                      className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm z-10 border-2 border-yellow-400 animate-pulse text-yellow-400 hover:bg-yellow-400 hover:text-black transition-colors"
+                      onClick={async () => {
+                        if (isPendingMission(member) || member.candidates?.length > 0) await openMyMissionModal();
+                        else if (isPendingPartner(member) || member.selectingPartner) await openMyPartnerModal();
+                      }}
+                      className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm z-10 border-2 border-white/20 text-white hover:bg-white/10 transition-colors"
                     >
-                      <span className="text-xl">⚡</span>
-                      <span className="text-[8px] font-black tracking-tighter">PROXY</span>
+                      <span className="text-xl">👤</span>
+                      <span className="text-[8px] font-black tracking-tighter">MY SELECT</span>
                     </button>
                   )}
 
-                  {/* Guest Select Button (Cyan) */}
-                  {canGuestSelect && (
+                  {/* ✅ ホストPROXY（オンライン/オフライン問わず） */}
+                  {canProxy && member.id !== userId && !isCurrent && (
                     <button
-                      onClick={() => setProxyTarget(member)}
-                      className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm z-10 border-2 border-cyan-400 animate-pulse text-cyan-400 hover:bg-cyan-400 hover:text-black transition-colors"
+                      onClick={() => openProxyForMember(member)}
+                      className="absolute bottom-1 left-1 right-1 bg-yellow-400 text-black text-[8px] font-black rounded py-1 shadow-[0_0_10px_yellow] border border-yellow-200"
                     >
-                      <span className="text-xl">👆</span>
-                      <span className="text-[8px] font-black tracking-tighter">SELECT</span>
+                      ⚡ PROXY
                     </button>
                   )}
                 </div>
@@ -1485,9 +1903,14 @@ export const GamePlayScreen = () => {
             const isOfflineDisplay = isOffline && !isGuest;
             const evt = member.event ? GAME_EVENTS[member.event] : null;
 
-            const needsSelection = (member.candidates && member.candidates.length > 0) || member.selectingPartner;
-            const canProxy = isHost && isOffline && needsSelection;
-            const canGuestSelect = isHost && isGuest && needsSelection;
+            const needsSelection =
+              (member.candidates && member.candidates.length > 0) ||
+              member.selectingPartner ||
+              isPendingMission(member) ||
+              isPendingPartner(member);
+
+            const canProxy = isHost && needsSelection; // ✅ いつでも
+            const isSelfNeeds = member.id === userId && needsSelection;
 
             return (
               <motion.div
@@ -1524,23 +1947,26 @@ export const GamePlayScreen = () => {
 
                   {isOfflineDisplay && <span className="ml-auto text-[9px] bg-red-900 text-red-300 px-1 rounded">OFFLINE</span>}
 
-                  {/* PROXY Button (Yellow) */}
-                  {canProxy && !canGuestSelect && (
+                  {/* ✅ 本人用ボタン（ホスト含む） */}
+                  {isSelfNeeds && !isCurrent && (
                     <button
-                      onClick={() => setProxyTarget(member)}
-                      className="ml-auto px-3 py-1.5 rounded bg-yellow-400 text-black font-black text-[10px] animate-pulse border-2 border-yellow-200 shadow-[0_0_10px_yellow] hover:scale-110 transition-transform z-10 flex items-center gap-1"
+                      onClick={async () => {
+                        if (isPendingMission(member) || member.candidates?.length > 0) await openMyMissionModal();
+                        else if (isPendingPartner(member) || member.selectingPartner) await openMyPartnerModal();
+                      }}
+                      className="ml-auto px-3 py-1.5 rounded bg-white/10 text-white font-black text-[10px] border border-white/20 hover:bg-white/20 transition-all flex items-center gap-1"
                     >
-                      ⚡ PROXY
+                      👤 MY SELECT
                     </button>
                   )}
 
-                  {/* Guest Select Button (Cyan) */}
-                  {canGuestSelect && (
+                  {/* ✅ ホストPROXY（オンライン/オフライン問わず） */}
+                  {canProxy && member.id !== userId && !isCurrent && (
                     <button
-                      onClick={() => setProxyTarget(member)}
-                      className="ml-auto px-3 py-1.5 rounded bg-cyan-500 text-black font-black text-[10px] animate-pulse border-2 border-cyan-200 shadow-[0_0_10px_cyan] hover:scale-110 transition-transform z-10 flex items-center gap-1"
+                      onClick={() => openProxyForMember(member)}
+                      className="ml-auto px-3 py-1.5 rounded bg-yellow-400 text-black font-black text-[10px] animate-pulse border-2 border-yellow-200 shadow-[0_0_10px_yellow] hover:scale-110 transition-transform z-10 flex items-center gap-1"
                     >
-                      👆 SELECT
+                      ⚡ PROXY
                     </button>
                   )}
                 </div>
@@ -1661,3 +2087,4 @@ export const GamePlayScreen = () => {
     </div>
   );
 };
+
