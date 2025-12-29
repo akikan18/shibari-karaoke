@@ -110,7 +110,7 @@ const shuffleArray = (array: any[]) => {
 const rollEvent = () => {
   // NOTE: 元コードだと Math.random() > 1.0 は絶対falseで、毎回イベントが出ます。
   // 意図ならそのままでOK。確率制にしたいなら例: if (Math.random() > 0.25) return null;
-  if (Math.random() > 1.0) return null;
+  if (Math.random() > 0.3) return null;
   const keys = Object.keys(GAME_EVENTS);
   return keys[Math.floor(Math.random() * keys.length)];
 };
