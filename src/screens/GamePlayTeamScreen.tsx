@@ -2074,7 +2074,7 @@ export const GamePlayTeamScreen = () => {
         }
 
         // ---- NORMAL SKILL/ULT ----
-        if (kind === 'skill' && r !== 'mimic') {
+        if (kind === 'skill' ) {
           if (r === 'maestro') {
             singer.buffs.maestroSkill = true;
             pushLines.push(`SKILL MAESTRO: armed (success COMBO+2 / fail -500)`);
