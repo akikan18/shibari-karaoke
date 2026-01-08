@@ -180,7 +180,8 @@ const ROLE_DEFS: RoleDef[] = [
     sigil: '◈',
     passive: '直前の味方成功の獲得点30%を、自分成功時に上乗せ。',
     skill: 'SKILL：(3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
-    ult: 'ULT：(1回) STEAL SKILL：敵ロールのSKILLを1回コピーして発動（必要ならターゲット選択あり）',
+    // ✅ FIX: ユーザー仕様に合わせて更新
+    ult: 'ULT：(1回) 発動後、味方全員の「次の自分のターン」に MIMIC パッシブを付与（そのターンのみ）。',
   },
   {
     id: 'hype',
@@ -214,7 +215,8 @@ const ROLE_DEFS: RoleDef[] = [
     name: 'GAMBLER',
     type: 'TEC',
     sigil: '🎲',
-    passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（250刻み）。',
+    // ✅ FIX: ユーザー仕様に合わせて更新
+    passive: 'PASSIVE：成功時に0〜1000のランダムで追加ボーナス。失敗時に0〜-1000からランダムで減点（100刻み）。',
     skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル使用時パッシブがマイナスなった場合でも0にとどまる。',
     ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
   },
@@ -671,15 +673,7 @@ const JoinTeamRoleModal = ({
 type TargetModalState = null | {
   title: string;
   mode: 'ally' | 'enemy';
-  action:
-    | 'coach_timeout'
-    | 'coach_ult'
-    | 'saboteur_sabotage'
-    | 'oracle_reroll'
-    | 'hype_boost'
-    | 'mimic_steal'
-    | 'mimic_stolen_ally'
-    | 'mimic_stolen_enemy';
+  action: 'coach_timeout' | 'coach_ult' | 'saboteur_sabotage' | 'oracle_reroll' | 'hype_boost';
 };
 
 const TargetModal = ({
@@ -800,8 +794,7 @@ const GuideModal = ({
                     <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">{team !== '?' ? `TEAM ${team}` : 'TEAM ?'}</div>
                   </div>
 
-              
-    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                       <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">PASSIVE</div>
                       <div className="text-[12px] text-white/75 leading-relaxed">{def?.passive || '未選択 / ロール未決定'}</div>
@@ -1016,9 +1009,6 @@ export const GamePlayTeamScreen = () => {
   // Overlay (skill/ult)
   const [abilityFx, setAbilityFx] = useState<AbilityFx>(null);
   const lastFxTimestampRef = useRef<number>(0);
-
-  // Mimic steal flow (client-side)
-  const [mimicStolenRoleId, setMimicStolenRoleId] = useState<RoleId | null>(null);
 
   const clearAbilityFx = useCallback(() => setAbilityFx(null), []);
   const clearActionLog = useCallback(() => setActiveActionLog(null), []);
@@ -1410,6 +1400,9 @@ export const GamePlayTeamScreen = () => {
     if (b.hypeBoost?.turns) chips.push(`HYPE +500 (${b.hypeBoost.turns}T)`);
     if (b.forcedSuccess) chips.push('FORCED SUCCESS');
     if (d.sabotaged) chips.push('SABOTAGED');
+
+    // ✅ FIX: MIMIC ULT付与の「共有パッシブ」表示
+    if ((b.mimicPassiveTurns ?? 0) > 0) chips.push(`MIMIC PASSIVE (${b.mimicPassiveTurns}T)`);
 
     if (oracleUltPick?.active) chips.push('ORACLE PICKING (ULT)');
 
@@ -1842,9 +1835,10 @@ export const GamePlayTeamScreen = () => {
 
     const rid: RoleId = currentSinger.role.id;
 
-    if (rid === 'mimic') return setTargetModal({ title: 'MIMIC ULT: 敵ロールを選択', mode: 'enemy', action: 'mimic_steal' });
+    // target ults
     if (rid === 'coach') return setTargetModal({ title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' });
 
+    // ✅ FIX: MIMIC ULTはターゲット不要（味方全員に次ターンMIMICパッシブ付与）
     const def = roleDef(rid);
     setConfirmState({
       title: 'CONFIRM ULT',
@@ -1871,10 +1865,9 @@ export const GamePlayTeamScreen = () => {
     const target = sortedMembers.find((m) => m.id === targetId);
     if (!target) return;
 
-    const isMimicSecond = action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy';
-    const effectiveRoleName = isMimicSecond ? `MIMIC (stolen ${mimicStolenRoleId || '—'})` : roleDef(rid)?.name || 'ROLE';
+    const effectiveRoleName = roleDef(rid)?.name || 'ROLE';
 
-    const kind = action === 'coach_ult' || action.startsWith('mimic_') ? 'ult' : 'skill';
+    const kind = action === 'coach_ult' ? 'ult' : 'skill';
     const title = kind === 'ult' ? 'CONFIRM ULT TARGET' : 'CONFIRM SKILL TARGET';
 
     const actionText =
@@ -1886,13 +1879,7 @@ export const GamePlayTeamScreen = () => {
         ? 'SABOTAGE'
         : action === 'oracle_reroll'
         ? 'REROLL'
-        : action === 'hype_boost'
-        ? 'HYPE BOOST'
-        : action === 'mimic_steal'
-        ? 'STEAL SKILL'
-        : action === 'mimic_stolen_ally'
-        ? 'STOLEN SKILL'
-        : 'STOLEN SKILL';
+        : 'HYPE BOOST';
 
     setConfirmState({
       title,
@@ -1918,40 +1905,6 @@ export const GamePlayTeamScreen = () => {
       confirmText: 'ACTIVATE',
       onConfirm: async () => {
         setConfirmState(null);
-
-        // mimic first step: choose enemy role -> then decide if target selection needed
-        if (action === 'mimic_steal') {
-          const stolen: RoleId | undefined = target?.role?.id;
-          if (!stolen) return;
-
-          setMimicStolenRoleId(stolen);
-
-          // need 2nd selection?
-          if (stolen === 'coach' || stolen === 'oracle' || stolen === 'hype') {
-            setTargetModal({ title: `MIMIC: STOLEN ${stolen.toUpperCase()} SKILL / 味方を選択`, mode: 'ally', action: 'mimic_stolen_ally' });
-            return;
-          }
-          if (stolen === 'saboteur') {
-            setTargetModal({ title: `MIMIC: STOLEN SABOTEUR SKILL / 敵を選択`, mode: 'enemy', action: 'mimic_stolen_enemy' });
-            return;
-          }
-
-          // no more selection -> activate directly
-          await applyAbility({ kind: 'ult', stolenRoleId: stolen });
-          setMimicStolenRoleId(null);
-          return;
-        }
-
-        // mimic second step
-        if (action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy') {
-          const stolen = mimicStolenRoleId;
-          if (!stolen) return;
-          await applyAbility({ kind: 'ult', stolenRoleId: stolen, targetId });
-          setMimicStolenRoleId(null);
-          return;
-        }
-
-        // normal
         await applyAbility({ kind: kind as any, targetId });
       },
     });
@@ -1960,7 +1913,7 @@ export const GamePlayTeamScreen = () => {
   // =========================
   // Ability Apply (transaction)
   // =========================
-  const applyAbility = async (opts: { kind: 'skill' | 'ult'; targetId?: string; stolenRoleId?: RoleId }) => {
+  const applyAbility = async (opts: { kind: 'skill' | 'ult'; targetId?: string }) => {
     if (!roomId || !currentSinger) return;
 
     setBusy(true);
@@ -2073,8 +2026,8 @@ export const GamePlayTeamScreen = () => {
           singer.role.ultUses -= 1;
         }
 
-        // ---- NORMAL SKILL/ULT ----
-        if (kind === 'skill' ) {
+        // ---- NORMAL SKILL ----
+        if (kind === 'skill') {
           if (r === 'maestro') {
             singer.buffs.maestroSkill = true;
             pushLines.push(`SKILL MAESTRO: armed (success COMBO+2 / fail -500)`);
@@ -2139,7 +2092,8 @@ export const GamePlayTeamScreen = () => {
           }
         }
 
-        if (kind === 'ult' && r !== 'mimic') {
+        // ---- NORMAL ULT (incl. MIMIC) ----
+        if (kind === 'ult') {
           if (r === 'maestro') {
             const combo = singer.combo ?? 0;
             const gain = combo * 800;
@@ -2165,8 +2119,6 @@ export const GamePlayTeamScreen = () => {
             pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
           } else if (r === 'saboteur') {
             // ✅ FIX: 次の敵1人ではなく「敵全員の次の自分の番」1回分 SEALED
-            // - 敵チームの特殊効果をリセット（チームバフ）
-            // - 敵メンバー全員の buffs/debuffs をリセットし、debuffs.sealedOnce を付与（1回分）
             teamBuffsTx[et] = {
               ...(teamBuffsTx[et] || {}),
               lastTeamDelta: 0,
@@ -2174,7 +2126,7 @@ export const GamePlayTeamScreen = () => {
               hypeUltTurns: 0,
               negHalfTurns: 0,
               negZeroTurns: 0,
-              sealedTurns: 0, // チーム封印は使わない（個人封印で全員に適用）
+              sealedTurns: 0,
             };
 
             const affected: string[] = [];
@@ -2184,7 +2136,7 @@ export const GamePlayTeamScreen = () => {
                 mems[i] = {
                   ...mems[i],
                   buffs: {},
-                  debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } }, // 次の自分のターン1回分
+                  debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } },
                 };
                 if (name) affected.push(name);
               }
@@ -2232,7 +2184,6 @@ export const GamePlayTeamScreen = () => {
               pushLines.push(`TARGETS: ${items.map((x) => x.targetName).join(', ')}`);
             }
 
-            // room state: oracleUltPick
             const oraclePickState: OracleUltPickState =
               items.length > 0
                 ? {
@@ -2245,79 +2196,25 @@ export const GamePlayTeamScreen = () => {
                     items,
                   }
                 : null;
-            // set into update later
+
             (data as any).__oraclePickState = oraclePickState;
-          }
-        }
-
-        // ---- MIMIC ULT (STEAL SKILL) ----
-        if (kind === 'ult' && r === 'mimic') {
-          const stolen = opts.stolenRoleId;
-          if (!stolen) return;
-
-          // Apply stolen SKILL effect once
-          if (stolen === 'coach') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.safe = true;
-            pushLines.push(`MIMIC ULT: stole COACH SKILL -> SAFE to ${target.name}`);
-          } else if (stolen === 'oracle') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const targetIdx = mems.findIndex((m: any) => m.id === targetId);
-            if (targetIdx === -1) return;
-            const target = { ...mems[targetIdx] };
-            if (target.team !== t) return;
-
-            const current = target.challenge ?? { title: 'FREE THEME', criteria: '—' };
-            const d2 = drawFromDeck<ThemeCard>(deck, pool, 2);
-            deck = d2.nextDeck;
-            deckChanged = true;
-            const extra = d2.choices || [];
-            const choices: ThemeCard[] = [current, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
-
-            target.candidates = choices;
-            target.challenge = current;
-            mems[targetIdx] = target;
-
-            pushLines.push(`MIMIC ULT: stole ORACLE SKILL -> REROLL for ${target.name} (opt1=current)`);
-          } else if (stolen === 'hype') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id, stolen: true };
-            pushLines.push(`MIMIC ULT: stole HYPE SKILL -> ${target.name} next 2 turns (success +500)`);
-          } else if (stolen === 'saboteur') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== et) return;
-            target.debuffs.sabotaged = { by: singer.id, fail: -1000, stolen: true };
-            pushLines.push(`MIMIC ULT: stole SABOTEUR SKILL -> sabotage ${target.name} (success +0 / fail -1000)`);
-          } else if (stolen === 'ironwall') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negHalfTurns: 1, negZeroTurns: 0 };
-            pushLines.push(`MIMIC ULT: stole IRONWALL SKILL -> next TEAM ${t} turn negative -50%`);
-          } else if (stolen === 'showman') {
-            singer.buffs.encore = true;
-            pushLines.push(`MIMIC ULT: stole SHOWMAN SKILL -> +500 on success (this turn)`);
-          } else if (stolen === 'maestro') {
-            singer.buffs.maestroSkill = true;
-            pushLines.push(`MIMIC ULT: stole MAESTRO SKILL -> (success COMBO+2 / fail -500)`);
-          } else if (stolen === 'gambler') {
-            singer.buffs.doubleDown = true;
-            singer.buffs.gamblerSkillClampPassive = true;
-            pushLines.push(`MIMIC ULT: stole GAMBLER SKILL -> DOUBLE DOWN armed + passive clamp`);
-          } else if (stolen === 'underdog') {
-            const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
-            const steal = clamp(Math.round(diff * 0.2), 0, 2000);
-            recordTeam(t, +steal, `MIMIC(stolen UNDERDOG SKILL) steal 20% up to 2000`);
-            recordTeam(et, -steal, `MIMIC(stolen UNDERDOG SKILL) stolen by TEAM ${t}`);
-            pushLines.push(`MIMIC ULT: stole UNDERDOG SKILL -> steal ${steal} from TEAM ${et}`);
-          } else {
-            pushLines.push(`MIMIC ULT: stole ${stolen} (no-op)`);
+          } else if (r === 'mimic') {
+            // ✅ FIX: MIMIC ULT -> 味方全員の「次の自分のターン」に MIMICパッシブ付与（1ターン）
+            const affected: string[] = [];
+            for (let i = 0; i < mems.length; i++) {
+              if (mems[i]?.team === t) {
+                mems[i] = {
+                  ...mems[i],
+                  buffs: {
+                    ...(mems[i].buffs || {}),
+                    mimicPassiveTurns: Math.max(1, mems[i]?.buffs?.mimicPassiveTurns ?? 0),
+                  },
+                };
+                affected.push(mems[i]?.name);
+              }
+            }
+            pushLines.push(`ULT MIMIC: grant MIMIC PASSIVE to ALL allies for their next personal turn`);
+            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
           }
         }
 
@@ -2564,22 +2461,32 @@ export const GamePlayTeamScreen = () => {
             }
           }
 
-          // GAMBLER passive (-500..1500 step 250) ; clamp if skill used
-          if (rid === 'gambler' && effectiveSuccess) {
-            const steps = 9; // -500 to 1500 in 250 steps => 9 values
-            const bonus = -500 + 250 * Math.floor(Math.random() * steps); // [-500..1500]
+          // ✅ FIX: GAMBLER passive (success: 0..1000, fail: 0..-1000) step 100
+          if (rid === 'gambler') {
             const clampFlag = !!singer.buffs?.gamblerSkillClampPassive;
-            const applied = clampFlag && bonus < 0 ? 0 : bonus;
-            if (clampFlag && bonus < 0) notes.push(`NOTE GAMBLER SKILL: PASSIVE clamp (${bonus} -> 0)`);
-            applySingerDelta(applied, `GAMBLER PASSIVE (RNG bonus)`);
+            if (effectiveSuccess) {
+              const step = 100;
+              const steps = 11; // 0..1000 => 11 values
+              const bonus = step * Math.floor(Math.random() * steps); // 0..1000
+              applySingerDelta(bonus, `GAMBLER PASSIVE (RNG bonus)`);
+            } else {
+              const step = 100;
+              const steps = 11; // 0..-1000 => 11 values
+              const raw = -step * Math.floor(Math.random() * steps); // 0, -100, ..., -1000
+              const applied = clampFlag && raw < 0 ? 0 : raw;
+              if (clampFlag && raw < 0) notes.push(`NOTE GAMBLER SKILL: PASSIVE clamp (${raw} -> 0)`);
+              applySingerDelta(applied, `GAMBLER PASSIVE (RNG penalty)`);
+            }
           }
 
-          // MIMIC passive
-          if (rid === 'mimic' && effectiveSuccess) {
+          // ✅ FIX: MIMIC passive (self) + shared by MIMIC ULT (buff: mimicPassiveTurns)
+          const mimicSharedTurns = singer.buffs?.mimicPassiveTurns ?? 0;
+          const canUseMimicPassive = rid === 'mimic' || mimicSharedTurns > 0;
+          if (canUseMimicPassive && effectiveSuccess) {
             const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
             if (last > 0) {
               const bonus = Math.round(last * 0.3);
-              applySingerDelta(bonus, `MIMIC PASSIVE (30% of last ally success ${last})`);
+              applySingerDelta(bonus, rid === 'mimic' ? `MIMIC PASSIVE (30% of last ally success ${last})` : `MIMIC PASSIVE (shared) (30% of last ally success ${last})`);
             }
           }
 
@@ -2675,7 +2582,14 @@ export const GamePlayTeamScreen = () => {
           if (sealedThisTurn) notes.push('NOTE SEALED: passive/skill/ult effects disabled');
         }
 
-        // Save lastTeamDelta for mimic passive
+        // ✅ FIX: MIMIC共有パッシブは「そのターン」で消費（成功/失敗、sealedでも消費）
+        if ((singer.buffs?.mimicPassiveTurns ?? 0) > 0) {
+          const next = Math.max(0, (singer.buffs.mimicPassiveTurns ?? 0) - 1);
+          singer.buffs.mimicPassiveTurns = next;
+          if (next === 0) singer.buffs.mimicPassiveTurns = null;
+        }
+
+        // Save lastTeamDelta for mimic passive (note: only on SUCCESS and not sealed)
         if (!sealedThisTurn && effectiveSuccess) teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: singerTurnDelta };
         else teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: teamBuffsTx[t]?.lastTeamDelta ?? 0 };
 
@@ -2877,9 +2791,6 @@ export const GamePlayTeamScreen = () => {
           const action = targetModal?.action;
           setTargetModal(null);
           if (!action) return;
-
-          if ((action === 'mimic_stolen_ally' || action === 'mimic_stolen_enemy') && !mimicStolenRoleId) return;
-
           requestConfirmTarget(action, id);
         }}
       />
@@ -3455,3 +3366,4 @@ const TeamScorePill = ({ team, score, leader }: { team: 'A' | 'B'; score: number
 };
 
 export default GamePlayTeamScreen;
+
