@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
@@ -18,11 +18,20 @@ type AlertInfo = {
   message: string;
 } | null;
 
+const ITEMS_PER_PAGE = 60; // 1ページの表示件数
+
 export const CustomThemeScreen = () => {
   const navigate = useNavigate();
+  const listContainerRef = useRef<HTMLDivElement>(null); // スクロール制御用Ref
+  
+  // --- データ管理 State ---
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
+  // --- 検索・ページング State ---
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+
   // --- モーダル管理 State ---
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -35,7 +44,7 @@ export const CustomThemeScreen = () => {
   // 入力用 State
   const [inputTitle, setInputTitle] = useState('');
   const [inputCriteria, setInputCriteria] = useState('');
-  const [inputPassword, setInputPassword] = useState(''); // パスワード入力用
+  const [inputPassword, setInputPassword] = useState('');
 
   // Firestoreからリアルタイム取得
   useEffect(() => {
@@ -54,6 +63,47 @@ export const CustomThemeScreen = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- 検索・ページングロジック ---
+
+  // 1. 検索フィルタリング
+  const filteredThemes = useMemo(() => {
+    if (!searchQuery.trim()) return themes;
+    const lowerQuery = searchQuery.toLowerCase();
+    return themes.filter(theme => 
+      theme.title.toLowerCase().includes(lowerQuery) || 
+      theme.criteria.toLowerCase().includes(lowerQuery)
+    );
+  }, [themes, searchQuery]);
+
+  // 2. ページネーション計算
+  const totalPages = Math.ceil(filteredThemes.length / ITEMS_PER_PAGE);
+  const paginatedThemes = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredThemes.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredThemes, currentPage]);
+
+  // ページや検索条件が変わったらスクロールをトップに戻す
+  useEffect(() => {
+    if (listContainerRef.current) {
+      listContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentPage, searchQuery]);
+
+  // 検索クエリが変わったらページを1に戻す
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  // --- お題作成支援機能（重複チェック） ---
+  const similarThemes = useMemo(() => {
+    if (!inputTitle || inputTitle.length < 2) return [];
+    const lowerInput = inputTitle.toLowerCase();
+    return themes.filter(t => t.title.toLowerCase().includes(lowerInput));
+  }, [inputTitle, themes]);
+
+
+  // --- アクション関数 ---
 
   // 追加処理
   const handleAdd = async () => {
@@ -76,6 +126,7 @@ export const CustomThemeScreen = () => {
       setInputTitle('');
       setInputCriteria('');
       setShowAddModal(false);
+      setAlertInfo({ type: 'success', title: 'ADDED', message: 'お題を追加しました' });
     } catch (error) {
       console.error("Error adding theme:", error);
       setAlertInfo({ type: 'error', title: 'ERROR', message: '追加に失敗しました' });
@@ -111,19 +162,14 @@ export const CustomThemeScreen = () => {
 
   // --- リセットフロー ---
 
-  // 1. リセットボタンクリック -> 確認モーダル表示
-  const startResetProcess = () => {
-    setShowResetConfirmModal(true);
-  };
-
-  // 2. 確認モーダルでYES -> パスワードモーダルへ
+  const startResetProcess = () => setShowResetConfirmModal(true);
+  
   const proceedToPassword = () => {
     setShowResetConfirmModal(false);
     setInputPassword('');
     setShowPasswordModal(true);
   };
 
-  // 3. パスワード送信 -> 判定して実行
   const submitPassword = async () => {
     if (inputPassword !== 'password') {
       setShowPasswordModal(false);
@@ -146,12 +192,12 @@ export const CustomThemeScreen = () => {
 
   return (
     <div className="w-full h-[100dvh] flex flex-col items-center relative overflow-hidden">
-      <div className="w-full max-w-7xl flex flex-col h-full px-4 py-6 md:py-12 relative z-10">
+      <div className="w-full max-w-7xl flex flex-col h-full px-4 py-6 md:py-8 relative z-10">
         
         {/* ヘッダーエリア */}
         <div className="flex justify-between items-end mb-4 shrink-0">
           <div>
-            <h1 className="text-3xl md:text-6xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
+            <h1 className="text-3xl md:text-5xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
               EDIT THEMES
             </h1>
             <div className="h-[2px] w-24 bg-cyan-500 mt-2 shadow-[0_0_10px_cyan]"></div>
@@ -160,34 +206,67 @@ export const CustomThemeScreen = () => {
             onClick={startResetProcess}
             className="text-[10px] md:text-xs text-white/40 hover:text-red-400 transition-colors tracking-widest border border-white/10 px-3 py-1 rounded hover:bg-white/5"
           >
-            RESET
+            RESET ALL
           </button>
         </div>
 
-        {/* 追加ボタン */}
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="w-full md:w-auto mb-6 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/50 text-cyan-300 px-6 py-4 rounded-xl font-black tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.2)] flex items-center justify-center gap-2 transition-all hover:scale-[1.01] shrink-0"
-        >
-          <span className="text-xl leading-none">＋</span> ADD NEW MISSION
-        </button>
+        {/* コントロールエリア（追加ボタン & 検索） */}
+        <div className="flex flex-col md:flex-row gap-4 mb-6 shrink-0">
+          <button 
+            onClick={() => setShowAddModal(true)}
+            className="flex-1 md:flex-none md:w-64 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/50 text-cyan-300 px-6 py-3 rounded-xl font-black tracking-widest shadow-[0_0_15px_rgba(6,182,212,0.2)] flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+          >
+            <span className="text-xl leading-none">＋</span> ADD NEW
+          </button>
 
-        {/* リストエリア */}
-        <div className="flex-1 overflow-y-auto pr-2 pb-32 custom-scrollbar">
-          <p className="text-xs text-gray-400 font-mono mb-2 text-right">
-            {selectedIds.length === 0 ? "TAP TO SELECT" : `${selectedIds.length} SELECTED`}
-          </p>
+          {/* 検索機能 */}
+          <div className="flex-1 relative group">
+            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-gray-500 group-focus-within:text-cyan-400 transition-colors">
+              🔍
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search themes..."
+              className="w-full h-full bg-black/40 border border-white/10 focus:border-cyan-500/50 rounded-xl pl-10 pr-4 text-white font-bold tracking-wide focus:outline-none focus:shadow-[0_0_15px_rgba(6,182,212,0.1)] transition-all placeholder:text-gray-600"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-3 flex items-center text-gray-500 hover:text-white"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* リストエリア（Refを付与してスクロール制御） */}
+        <div 
+          ref={listContainerRef}
+          className="flex-1 overflow-y-auto pr-2 pb-32 custom-scrollbar"
+        >
+          <div className="flex justify-between items-center mb-2 px-1">
+            <p className="text-xs text-gray-500 font-mono">
+               TOTAL: {filteredThemes.length} / PAGE: {currentPage} of {totalPages || 1}
+            </p>
+            <p className="text-xs text-gray-400 font-mono">
+              {selectedIds.length === 0 ? "TAP TO SELECT" : `${selectedIds.length} SELECTED`}
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
-              {themes.map((theme) => {
+              {paginatedThemes.map((theme) => {
                 const isSelected = selectedIds.includes(theme.id);
                 return (
                   <motion.div
                     key={theme.id}
                     layout
-                    initial={{ opacity: 0, scale: 0.9 }}
+                    initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
                     onClick={() => toggleSelection(theme.id)}
                     className="group relative cursor-pointer"
                   >
@@ -225,12 +304,42 @@ export const CustomThemeScreen = () => {
               })}
             </AnimatePresence>
             
-            {themes.length === 0 && (
-              <div className="col-span-full text-center py-10 opacity-50">
-                <p className="font-mono text-sm tracking-widest">NO THEMES REGISTERED</p>
+            {paginatedThemes.length === 0 && (
+              <div className="col-span-full text-center py-20 opacity-50">
+                <p className="font-mono text-sm tracking-widest text-gray-500">NO THEMES FOUND</p>
+                {searchQuery && <p className="text-xs mt-2 text-gray-600">Try a different keyword</p>}
               </div>
             )}
           </div>
+          
+          {/* ページングコントロール */}
+          {totalPages > 1 && (
+            <div className="flex justify-center items-center gap-4 mt-8 mb-4">
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 rounded-lg border border-white/10 bg-black/40 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs font-bold tracking-widest transition-colors text-white"
+              >
+                PREV
+              </button>
+              <div className="flex gap-2">
+                 <span className="px-3 py-2 rounded bg-cyan-900/50 border border-cyan-500/30 text-cyan-400 font-mono text-xs font-bold">
+                    {currentPage}
+                 </span>
+                 <span className="px-3 py-2 text-gray-500 font-mono text-xs flex items-center">
+                    / {totalPages}
+                 </span>
+              </div>
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 rounded-lg border border-white/10 bg-black/40 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs font-bold tracking-widest transition-colors text-white"
+              >
+                NEXT
+              </button>
+            </div>
+          )}
+
         </div>
       </div>
 
@@ -267,30 +376,77 @@ export const CustomThemeScreen = () => {
       </div>
 
 
-      {/* --- モーダルエリア (すべて画面内デザイン) --- */}
+      {/* --- モーダルエリア --- */}
 
-      {/* 1. 追加モーダル */}
+      {/* 1. 追加モーダル（お題作成支援機能付き） */}
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowAddModal(false)} />
-            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-lg bg-[#0f172a] border border-cyan-500/30 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.2)] overflow-hidden p-6">
-              <h2 className="text-xl font-black text-white tracking-widest mb-6 flex items-center gap-2">
-                <span className="text-cyan-400">＋</span> ADD NEW MISSION
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-bold text-cyan-400 tracking-widest block mb-1 opacity-70">MISSION TITLE</label>
-                  <input autoFocus type="text" value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="Ex: 英語禁止で歌え！" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-cyan-500 focus:outline-none placeholder:text-white/10" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-red-400 tracking-widest block mb-1 opacity-70">CLEAR CONDITION</label>
-                  <input type="text" value={inputCriteria} onChange={(e) => setInputCriteria(e.target.value)} placeholder="Ex: 85点以上" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-red-500 focus:outline-none placeholder:text-white/10" />
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative w-full max-w-lg bg-[#0f172a] border border-cyan-500/30 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.2)] overflow-hidden flex flex-col max-h-[85vh]">
+              
+              <div className="p-6 shrink-0 border-b border-white/5">
+                <h2 className="text-xl font-black text-white tracking-widest flex items-center gap-2">
+                  <span className="text-cyan-400">＋</span> ADD NEW MISSION
+                </h2>
+              </div>
+
+              <div className="p-6 overflow-y-auto custom-scrollbar">
+                <div className="space-y-6">
+                  <div>
+                    <label className="text-[10px] font-bold text-cyan-400 tracking-widest block mb-1 opacity-70">MISSION TITLE</label>
+                    <input 
+                      autoFocus 
+                      type="text" 
+                      value={inputTitle} 
+                      onChange={(e) => setInputTitle(e.target.value)} 
+                      placeholder="Ex: 英語禁止で歌え！" 
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-cyan-500 focus:outline-none placeholder:text-white/10 transition-colors" 
+                    />
+                    
+                    {/* お題作成支援：類似お題の表示 */}
+                    <AnimatePresence>
+                      {similarThemes.length > 0 && (
+                        <motion.div 
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-2 bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
+                            <p className="text-[10px] font-bold text-yellow-500 tracking-widest mb-2 flex items-center gap-1">
+                              <span>⚠️</span> SIMILAR THEMES FOUND ({similarThemes.length})
+                            </p>
+                            <div className="flex flex-col gap-1 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                              {similarThemes.map(t => (
+                                <div key={t.id} className="text-xs text-gray-300 bg-black/40 px-2 py-1.5 rounded flex justify-between border border-white/5">
+                                  <span className="truncate mr-2">{t.title}</span>
+                                  <span className="text-gray-500 whitespace-nowrap text-[10px]">{t.criteria}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  
+                  <div>
+                    <label className="text-[10px] font-bold text-red-400 tracking-widest block mb-1 opacity-70">CLEAR CONDITION</label>
+                    <input 
+                      type="text" 
+                      value={inputCriteria} 
+                      onChange={(e) => setInputCriteria(e.target.value)} 
+                      placeholder="Ex: 85点以上" 
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg font-bold text-white focus:border-red-500 focus:outline-none placeholder:text-white/10 transition-colors" 
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="flex w-full gap-3 mt-8">
+
+              <div className="p-6 pt-0 mt-auto flex w-full gap-3">
                 <button onClick={() => setShowAddModal(false)} className="flex-1 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-gray-400 font-bold tracking-widest text-sm">CANCEL</button>
-                <button onClick={handleAdd} disabled={!inputTitle || !inputCriteria} className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black tracking-widest text-sm shadow-lg shadow-cyan-900/50 disabled:opacity-50">ADD</button>
+                <button onClick={handleAdd} disabled={!inputTitle || !inputCriteria} className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black tracking-widest text-sm shadow-lg shadow-cyan-900/50 disabled:opacity-50 disabled:shadow-none">ADD</button>
               </div>
             </motion.div>
           </div>
@@ -360,7 +516,7 @@ export const CustomThemeScreen = () => {
                   type="password" 
                   value={inputPassword} 
                   onChange={(e) => setInputPassword(e.target.value)} 
-                  className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg text-center font-bold text-white focus:border-cyan-500 focus:outline-none tracking-widest"
+                  className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-lg text-center font-bold text-white focus:border-cyan-500 focus:outline-none tracking-widest transition-colors"
                   placeholder="••••••••"
                 />
                 <div className="flex w-full gap-3 mt-2">
