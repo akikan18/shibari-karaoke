@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc, runTransaction } from 'firebase/firestore';
@@ -224,9 +224,13 @@ export const TeamDraftScreen = () => {
   // 遷移アニメーション管理
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  // ★ 追加：チーム内歌唱順編集フェーズ（draft終了後〜playing前）
+  // チーム内歌唱順編集フェーズ
   const [isOrderEditing, setIsOrderEditing] = useState(false);
   const [orderEditBusy, setOrderEditBusy] = useState(false);
+
+  // ★ ランダムピック関連State
+  const [isRandomizing, setIsRandomizing] = useState(false);
+  const [randomTargetRole, setRandomTargetRole] = useState<any>(null);
 
   // Load User & Room Data
   useEffect(() => {
@@ -248,14 +252,14 @@ export const TeamDraftScreen = () => {
       if (data.currentPickIndex !== undefined) setCurrentPickIndex(data.currentPickIndex);
       if (Array.isArray(data.draftOrder)) setDraftOrder(data.draftOrder);
 
-      // ★ draft完了後：playing直前に歌唱順編集を挟む
+      // draft完了後：playing直前に歌唱順編集を挟む
       if (data.mode === 'team' && data.status === 'order_edit') {
         setIsOrderEditing(true);
       } else {
         setIsOrderEditing(false);
       }
 
-      // ステータスが playing になったら演出を開始（既存維持）
+      // ステータスが playing になったら演出を開始
       if (data.status === 'playing' && data.mode === 'team') {
         setIsTransitioning(true);
         setIsOrderEditing(false);
@@ -274,7 +278,7 @@ export const TeamDraftScreen = () => {
     return () => unsub();
   }, [navigate]);
 
-  // 演出完了後の遷移処理（既存維持）
+  // 演出完了後の遷移処理
   useEffect(() => {
     if (isTransitioning) {
       const timer = setTimeout(() => {
@@ -311,10 +315,7 @@ export const TeamDraftScreen = () => {
 
   // Derived Values
   const currentPickerId = draftOrder[currentPickIndex];
-
-  // 自分のターン OR ホストによる代理選択
   const canPick = currentPickerId === userId || isHost;
-
   const currentPickerMember = members.find((m) => m.id === currentPickerId);
 
   const teamA = useMemo(
@@ -336,7 +337,33 @@ export const TeamDraftScreen = () => {
     return map;
   }, [members]);
 
-  // --- Action: Role Pick ---
+  // --- Action: Random Pick Trigger ---
+  const triggerRandomPick = () => {
+    if (!canPick || isPickingBusy || isRandomizing || isOrderEditing) return;
+    
+    // 空いているロールを取得
+    const availableRoles = (ROLES as any[]).filter(r => !takenRoleMap.has(r.id));
+    if (availableRoles.length === 0) return;
+
+    // ランダム決定
+    const target = availableRoles[Math.floor(Math.random() * availableRoles.length)];
+    
+    // 演出開始
+    setRandomTargetRole(target);
+    setIsRandomizing(true);
+    setRoleModal(null); // モーダルが開いていたら閉じる
+  };
+
+  // ランダム演出完了後のコールバック
+  const onRandomAnimationComplete = () => {
+    if (randomTargetRole) {
+      handleSelectRole(randomTargetRole.id);
+    }
+    setIsRandomizing(false);
+    setRandomTargetRole(null);
+  };
+
+  // --- Action: Role Pick (Core Logic) ---
   const handleSelectRole = async (roleId: string) => {
     if (!roomId || isPickingBusy) return;
     setIsPickingBusy(true);
@@ -369,7 +396,6 @@ export const TeamDraftScreen = () => {
               ...m,
               role: {
                 ...roleData,
-                // ★ 仕様に合わせて (3回) / (1回) / ULTなし
                 skillUses: 3,
                 ultUses: ultHasDash ? 0 : 1,
               },
@@ -384,7 +410,6 @@ export const TeamDraftScreen = () => {
         tx.update(roomRef, {
           members: newMembers,
           currentPickIndex: nextIndex,
-          // ★ 変更：ドラフト終了→即playing ではなく order_edit にする（既存機能は維持しつつ間に挟む）
           status: finished ? 'order_edit' : 'drafting',
         });
       });
@@ -400,12 +425,9 @@ export const TeamDraftScreen = () => {
     if (!isOrderEditing) return false;
     if (orderEditBusy) return false;
     if (isHost) return true;
-    // 非ホストは「自分のチームだけ」編集可（必要ならここを isHost のみに簡略化OK）
     return myMember?.team === team;
   };
 
-  // 「チーム内順序」を、現在のturnOrderの“枠(偶数/奇数)”を保ったまま入れ替える
-  // 例）Team AのturnOrderが [0,2,4] なら、その枠に並べ替えたIDを割り当てる
   const applyTeamOrder = async (team: 'A' | 'B', orderedIds: string[]) => {
     if (!roomId) return;
     setOrderEditBusy(true);
@@ -422,7 +444,6 @@ export const TeamDraftScreen = () => {
         const mems: any[] = data.members || [];
         const my = mems.find((m) => m.id === userId);
 
-        // 権限チェック：ホスト or 自チームのみ
         if (!isHost && my?.team !== team) return;
 
         const teamMembers = mems
@@ -432,7 +453,6 @@ export const TeamDraftScreen = () => {
 
         const slots = teamMembers.map((m) => m.turnOrder ?? 999).slice().sort((a, b) => a - b);
 
-        // orderedIds がチームメンバーの全員分であることを想定（UI側で保証）
         const idSet = new Set(teamMembers.map((m) => m.id));
         const ok = orderedIds.length === teamMembers.length && orderedIds.every((id) => idSet.has(id));
         if (!ok) return;
@@ -468,7 +488,7 @@ export const TeamDraftScreen = () => {
 
   const handleFinalizeOrder = async () => {
     if (!roomId) return;
-    if (!isHost) return; // 最終確定はホストのみ（必要ならここも緩和OK）
+    if (!isHost) return;
     if (orderEditBusy) return;
 
     setOrderEditBusy(true);
@@ -495,10 +515,9 @@ export const TeamDraftScreen = () => {
       animate="visible"
       className="w-full h-[100dvh] flex flex-col relative overflow-hidden text-white bg-black font-sans selection:bg-cyan-500/30 transition-colors duration-1000"
     >
-      {/* Background Effect (Lobby Style) */}
+      {/* Background Effect */}
       <div className="absolute inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20" />
-        {/* Team Mode Ambient: Orange/Red vs Purple/Cyan */}
         <div className="absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] bg-purple-900/30 blur-[120px] rounded-full mix-blend-screen animate-pulse" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50vw] h-[50vw] bg-red-900/30 blur-[120px] rounded-full mix-blend-screen animate-pulse delay-1000" />
       </div>
@@ -506,14 +525,11 @@ export const TeamDraftScreen = () => {
       {/* --- HEADER --- */}
       <header className="flex-none relative z-20 w-full bg-black/40 backdrop-blur-md border-b border-white/10 px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          {/* Title Section */}
           <div>
             <GlitchText
               text="ROLE DRAFT"
               className="text-xl md:text-3xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-white drop-shadow-[0_0_15px_rgba(34,211,238,0.3)]"
             />
-
-            {/* SYSTEM ONLINE */}
             <div className="flex items-center gap-2 mt-1.5 relative z-10">
               <span className="text-[10px] font-mono text-cyan-300/80 tracking-widest bg-cyan-950/50 border border-cyan-500/20 px-1.5 py-0.5 rounded-sm">
                 PHASE: {isOrderEditing ? 'ORDER EDIT' : 'SELECTION'}
@@ -526,8 +542,7 @@ export const TeamDraftScreen = () => {
             </div>
           </div>
 
-          {/* Turn Info */}
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-2">
               <span className="hidden md:inline text-[10px] font-mono text-white/50 tracking-widest">STATUS</span>
               <div
@@ -553,15 +568,17 @@ export const TeamDraftScreen = () => {
                 </span>
               </div>
             </div>
-            <div className="text-[10px] font-mono text-white/30 mt-1">
-              {isOrderEditing ? (
-                <>DRAFT COMPLETE</>
-              ) : (
-                <>
-                  SEQUENCE {Math.min(currentPickIndex + 1, draftOrder.length)} / {draftOrder.length}
-                </>
-              )}
-            </div>
+            
+            {/* ★ RANDOM PICK BUTTON (Only visible when it's user's turn) */}
+            {!isOrderEditing && canPick && (
+               <button
+                 onClick={triggerRandomPick}
+                 disabled={isPickingBusy || isRandomizing}
+                 className="flex items-center gap-2 px-3 py-1 bg-purple-600/20 hover:bg-purple-600/40 border border-purple-500/50 rounded-lg text-purple-200 text-[10px] font-bold tracking-widest shadow-[0_0_10px_rgba(168,85,247,0.3)] hover:shadow-[0_0_20px_rgba(168,85,247,0.5)] transition-all active:scale-95"
+               >
+                 <span>🎲</span> RANDOM DECIDE
+               </button>
+            )}
           </div>
         </div>
       </header>
@@ -591,18 +608,15 @@ export const TeamDraftScreen = () => {
             </button>
           </div>
 
-          {/* Draft Finished Hint (non-blocking) */}
           {(isDraftFinished || isOrderEditing) && (
             <div className="mb-4 p-3 rounded-xl border border-yellow-500/20 bg-yellow-950/20">
               <div className="text-[10px] font-mono tracking-widest text-yellow-200/80">NOTICE</div>
               <div className="text-xs text-white/70 mt-1 leading-relaxed">
                 ドラフト完了後、ゲーム開始前に <span className="text-yellow-200 font-bold">チーム内の歌唱順</span> を調整できます。
-                （既存の遷移演出はそのままです）
               </div>
             </div>
           )}
 
-          {/* Animation Container */}
           <motion.div
             variants={cardContainerVariants}
             initial="hidden"
@@ -679,12 +693,10 @@ export const TeamDraftScreen = () => {
             })}
           </div>
         </div>
-       
-</div>
+      </div>
 
       {/* --- MODALS --- */}
 
-      {/* Mobile Team Viewer */}
       <AnimatePresence>
         {showMobileTeams && (
           <motion.div
@@ -721,7 +733,6 @@ export const TeamDraftScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* Role Detail Modal */}
       <AnimatePresence>
         {roleModal && (
           <RoleDetailModal
@@ -735,7 +746,6 @@ export const TeamDraftScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* ★ 追加：TEAM ORDER EDIT OVERLAY（ドラフト終了後〜開始前） */}
       <AnimatePresence>
         {isOrderEditing && (
           <TeamOrderEditOverlay
@@ -751,7 +761,17 @@ export const TeamDraftScreen = () => {
         )}
       </AnimatePresence>
 
-      {/* ★★★ VS TRANSITION SCREEN (UPGRADED) ★★★ */}
+      {/* ★ RANDOM ROULETTE OVERLAY (NEW) */}
+      <AnimatePresence>
+        {isRandomizing && randomTargetRole && (
+          <RandomRouletteOverlay
+             availableRoles={(ROLES as any[]).filter(r => !takenRoleMap.has(r.id))}
+             targetRole={randomTargetRole}
+             onComplete={onRandomAnimationComplete}
+          />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>{isTransitioning && <MatchupTransition teamA={teamA} teamB={teamB} />}</AnimatePresence>
     </motion.div>
   );
@@ -760,6 +780,87 @@ export const TeamDraftScreen = () => {
 // --------------------
 // Sub Components & Helpers
 // --------------------
+
+// ★ Random Roulette Overlay (New Component)
+const RandomRouletteOverlay = ({ availableRoles, targetRole, onComplete }: { availableRoles: any[], targetRole: any, onComplete: () => void }) => {
+  const [displayRole, setDisplayRole] = useState(availableRoles[0]);
+  const [stage, setStage] = useState<'spinning' | 'locked'>('spinning');
+
+  useEffect(() => {
+    // 1. 高速回転
+    let intervalId: any;
+    let counter = 0;
+    const spinDuration = 2000; // 2秒間回転
+    const speed = 50; // 50msごとに切り替え
+
+    intervalId = setInterval(() => {
+       const nextIndex = counter % availableRoles.length;
+       setDisplayRole(availableRoles[nextIndex]);
+       counter++;
+    }, speed);
+
+    // 2. 確定演出
+    const timeoutId = setTimeout(() => {
+       clearInterval(intervalId);
+       setDisplayRole(targetRole);
+       setStage('locked');
+       
+       // 3. 完了通知（少し待ってから）
+       setTimeout(onComplete, 1500); 
+    }, spinDuration);
+
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[150] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center p-6"
+    >
+       <div className="text-[10px] font-mono tracking-[0.3em] text-cyan-400 mb-8 animate-pulse">SYSTEM SELECTING...</div>
+       
+       <div className="relative w-full max-w-sm aspect-square flex items-center justify-center">
+          {/* Animated Rings */}
+          <div className="absolute inset-0 border-2 border-cyan-500/20 rounded-full animate-[spin_3s_linear_infinite]" />
+          <div className="absolute inset-4 border border-purple-500/20 rounded-full animate-[spin_5s_linear_infinite_reverse]" />
+          
+          <motion.div 
+             key={displayRole.id}
+             className="flex flex-col items-center"
+             animate={stage === 'locked' ? { scale: [1, 1.2, 1], filter: ['brightness(1)', 'brightness(2)', 'brightness(1)'] } : {}}
+             transition={{ duration: 0.3 }}
+          >
+             <div className={`w-32 h-32 md:w-48 md:h-48 rounded-3xl bg-gradient-to-br ${displayRole.tone} flex items-center justify-center text-6xl md:text-8xl shadow-[0_0_30px_rgba(255,255,255,0.2)] border border-white/20 mb-6 relative overflow-hidden`}>
+                <span className="relative z-10">{displayRole.sigil}</span>
+                {stage === 'locked' && <div className="absolute inset-0 bg-white/50 animate-ping" />}
+             </div>
+             <div className="text-3xl md:text-5xl font-black italic tracking-tighter text-white text-center drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+               {displayRole.name}
+             </div>
+             <div className="text-sm font-mono text-cyan-200 mt-2 tracking-widest bg-cyan-900/40 px-3 py-1 rounded border border-cyan-500/30">
+               TYPE: {displayRole.type}
+             </div>
+          </motion.div>
+       </div>
+
+       {stage === 'locked' && (
+         <motion.div 
+           initial={{ y: 20, opacity: 0 }}
+           animate={{ y: 0, opacity: 1 }}
+           className="mt-12 text-2xl font-black italic text-yellow-400 tracking-widest"
+         >
+           LOCKED IN!
+         </motion.div>
+       )}
+    </motion.div>
+  );
+};
+
 const GlitchText = ({ text, className }: { text: string; className?: string }) => (
   <div className={`relative ${className}`}>
     <span className="relative z-10">{text}</span>
