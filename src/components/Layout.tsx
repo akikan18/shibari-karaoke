@@ -20,7 +20,8 @@ const Particle = ({ delay }: { delay: number }) => (
 export const Layout = ({ children }: LayoutProps) => {
   return (
     // 全体のテーマ：高級感のあるダークブルーベース
-    <div className="min-h-screen bg-[#0f172a] text-white font-sans overflow-hidden relative flex flex-col items-center justify-center selection:bg-cyan-500/30">
+    // flex flex-col を追加して、直下の要素（main）が伸縮できるようにします
+    <div className="min-h-screen bg-[#0f172a] text-white font-sans overflow-hidden relative flex flex-col selection:bg-cyan-500/30">
       
       {/* --- 背景演出 --- */}
       <div className="fixed inset-0 pointer-events-none z-0 perspective-1000">
@@ -49,7 +50,13 @@ export const Layout = ({ children }: LayoutProps) => {
       </div>
 
       {/* --- メインコンテンツ --- */}
-      <main className="w-full relative z-10 flex flex-col items-center justify-center min-h-screen p-6">
+      {/* 修正点: 
+         1. min-h-screen -> flex-1 (親のflexコンテナに合わせて伸縮)
+         2. p-6 を削除 (余白をなくして画面いっぱいに)
+         3. items-center justify-center を削除 (子コンポーネント側でレイアウト制御させるため)
+            ※もし子要素を常に真ん中に置きたい場合は flex flex-col items-center justify-center を復活させてください
+      */}
+      <main className="w-full flex-1 relative z-10 flex flex-col">
         {children}
       </main>
 
