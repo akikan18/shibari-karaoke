@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { ref, onValue, onDisconnect, set, remove, serverTimestamp } from 'firebase/database';
+import { ref, onValue, onDisconnect, set, serverTimestamp } from 'firebase/database';
 import { rtdb } from '../firebase';
 
 export const usePresence = (roomId: string, userId: string, roomData: any, addToast: (msg: string) => void) => {
@@ -13,6 +13,11 @@ export const usePresence = (roomId: string, userId: string, roomData: any, addTo
   const prevOnlineMembersRef = useRef<Set<string> | null>(null);
   const kickedOutIdsRef = useRef<Set<string>>(new Set());
   
+  // ★リロード対策：退室判定を保留するためのタイマー管理
+  const disconnectTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // 最新のRTDBデータを保持（タイマーコールバック内で参照するため）
+  const latestSnapshotMembers = useRef<Set<string>>(new Set());
+
   // 初回マウント時の通知抑制フラグ
   const canNotify = useRef(false);
 
@@ -24,83 +29,119 @@ export const usePresence = (roomId: string, userId: string, roomData: any, addTo
     return () => clearTimeout(timer);
   }, []);
 
-  // 1. 自分の在席登録と接続管理（★ここを修正）
+  // 1. 自分の在席登録と接続管理
   useEffect(() => {
     if (!roomId || !userId) return;
 
     const myStatusRef = ref(rtdb, `rooms/${roomId}/online/${userId}`);
-    // Firebase自体の接続状態を監視する特別なパス
     const connectedRef = ref(rtdb, '.info/connected');
 
-    // ■ 接続状態監視ハンドラ
-    // 接続が確立・復帰するたびに実行される
     const unsubscribeConnected = onValue(connectedRef, (snap) => {
       if (snap.val() === true) {
-        // 1. 切断時（タブ閉じやネット切れ）に削除されるよう予約
-        onDisconnect(myStatusRef).remove()
+        // サーバー側での切断時削除予約
+        // （.cancel() を挟むことで、前回の予約が残っていた場合の競合を防ぐのがベストプラクティスです）
+        onDisconnect(myStatusRef).cancel()
           .then(() => {
-            // 2. 予約完了後、自分の情報をセット（これで復帰時も即座に再登録されます）
+             return onDisconnect(myStatusRef).remove();
+          })
+          .then(() => {
+            // 予約完了後に自分の情報をセット
             set(myStatusRef, { id: userId, joinedAt: serverTimestamp() });
           })
           .catch((err) => console.error('onDisconnect setup failed', err));
       }
     });
 
-    // ■ 画面の表示状態監視ハンドラ (スマホのアプリ切り替え対策)
-    // バックグラウンドから戻ってきた時に強制的にデータを書き込む
+    // アプリ切り替え等で戻ってきた時の保険
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        // 念のため再登録を行う（Socketが切れてデータが消えていた場合の保険）
         set(myStatusRef, { id: userId, joinedAt: serverTimestamp() }).catch(console.error);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // ■ タブを閉じた時の即時削除
-    const handleDisconnect = () => {
-       remove(myStatusRef).catch(err => console.error(err));
-    };
-    // PC向け
-    window.addEventListener('beforeunload', handleDisconnect);
-    // スマホ向け (beforeunloadより信頼性が高い)
-    window.addEventListener('pagehide', handleDisconnect);
+    // ★重要： window.addEventListener('beforeunload'...) は削除しました。
+    // 手動削除を行わず、サーバー側の onDisconnect に任せることで、
+    // リロード時の「削除→再接続」の競合（点滅）を防ぎます。
 
     return () => {
-      // クリーンアップ
       unsubscribeConnected();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleDisconnect);
-      window.removeEventListener('pagehide', handleDisconnect);
-      
-      // コンポーネントのアンマウント時（画面内のページ遷移）では
-      // 「退出」扱いにしたくないため、切断時の削除予約をキャンセルする
+      // アンマウント時（ページ内遷移）は削除予約をキャンセル
       onDisconnect(myStatusRef).cancel();
     };
   }, [roomId, userId]);
 
-  // 2. 他メンバーの監視 (RTDB) - 変更なし
+  // 2. 他メンバーの監視 (RTDB) & ★デバウンス処理
   useEffect(() => {
     if (!roomId) return;
     const roomOnlineRef = ref(rtdb, `rooms/${roomId}/online`);
     
     const unsubscribe = onValue(roomOnlineRef, (snapshot) => {
       const val = snapshot.val();
-      const currentOnlineIds = new Set<string>();
-      if (val) Object.keys(val).forEach(key => currentOnlineIds.add(key));
-      setOnlineMembers(currentOnlineIds);
+      const newSnapshotMembers = new Set<string>();
+      if (val) Object.keys(val).forEach(key => newSnapshotMembers.add(key));
+
+      // 最新状態をRefに保存（遅延実行時に参照するため）
+      latestSnapshotMembers.current = newSnapshotMembers;
+
+      setOnlineMembers((prevOnlineMembers) => {
+        const nextMembers = new Set(prevOnlineMembers);
+        
+        // A. 新しく入った人（または戻ってきた人）の処理
+        // 即座に反映（リロード復帰を素早く検知するため）
+        newSnapshotMembers.forEach(id => {
+          if (!nextMembers.has(id)) {
+            nextMembers.add(id);
+          }
+          // もし退出保留中タイマーがあればキャンセル（「やっぱり居た」扱い）
+          if (disconnectTimers.current.has(id)) {
+            clearTimeout(disconnectTimers.current.get(id)!);
+            disconnectTimers.current.delete(id);
+          }
+        });
+
+        // B. 消えた人の処理
+        // 即座に消さず、タイマーをセットして「本当にいなくなったか」確認する
+        prevOnlineMembers.forEach(id => {
+          if (!newSnapshotMembers.has(id)) {
+            // すでにタイマーが回っていなければセット
+            if (!disconnectTimers.current.has(id)) {
+              const timer = setTimeout(() => {
+                // 3秒後に再チェック
+                if (!latestSnapshotMembers.current.has(id)) {
+                  // 本当にいないならStateから削除
+                  setOnlineMembers(current => {
+                    const updated = new Set(current);
+                    updated.delete(id);
+                    return updated;
+                  });
+                }
+                disconnectTimers.current.delete(id);
+              }, 3000); // ★ここの秒数だけリロード時の「不在」表示を耐えます
+
+              disconnectTimers.current.set(id, timer);
+            }
+          }
+        });
+
+        // Stateを返す（追加分は即反映、削除分はタイマー任せなのでここではまだ消さない）
+        return nextMembers;
+      });
+
       setIsDataLoaded(true);
     });
+
     return () => unsubscribe();
   }, [roomId]);
 
-  // 3. オフライン判定 & 差分通知ロジック - 変更なし
+  // 3. オフライン判定 & 通知 (ロジックはほぼ変更なし)
   useEffect(() => {
     if (!roomData || !roomData.members || !isDataLoaded) return;
 
     const currentOffline = new Set<string>();
     let hostIsOffline = false;
     
-    // 現在のFirestoreメンバーとRTDBオンライン状況を比較
     roomData.members.forEach((member: any) => {
       if (member.id === userId) return; 
       if (!onlineMembers.has(member.id)) {
@@ -109,7 +150,8 @@ export const usePresence = (roomId: string, userId: string, roomData: any, addTo
       }
     });
 
-    // --- 通知ロジック ---
+    // 通知ロジック
+    // （onlineMembersがデバウンスされているため、通知も自動的にリロードを無視します）
     if (canNotify.current && prevOnlineMembersRef.current !== null) {
       const prev = prevOnlineMembersRef.current;
       
@@ -119,15 +161,12 @@ export const usePresence = (roomId: string, userId: string, roomData: any, addTo
         const isNowOnline = onlineMembers.has(member.id);
         const wasOnline = prev.has(member.id);
 
-        // 退出検知
         if (wasOnline && !isNowOnline) {
           addToast(`${member.name} が退出しました`);
           kickedOutIdsRef.current.add(member.id);
         }
 
-        // 復帰検知
         if (!wasOnline && isNowOnline) {
-          // 「退出通知済み」の人だけ復帰通知を出す
           if (kickedOutIdsRef.current.has(member.id)) {
             addToast(`${member.name} が復帰しました！`);
             kickedOutIdsRef.current.delete(member.id);
