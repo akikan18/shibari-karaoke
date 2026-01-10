@@ -5,6 +5,8 @@ import { doc, onSnapshot, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { planStartAuras, normalizeTeamBuffs } from '../game/team-battle/scoring';
+import { fmt, fmtChangeLine } from '../game/team-battle/utils';
+import { ScoreChange, TeamId } from '../game/team-battle/types';
 
 // --------------------
 // Role Definitions (Updated)
@@ -518,25 +520,43 @@ export const TeamDraftScreen = () => {
 
         const auraPlans = planStartAuras(members, firstSinger, currentTeamScores, teamBuffs);
 
-        let turnStartBonus = 0;
-        const logs: string[] = [];
+        // Build score changes and update team scores
+        const auraChanges: ScoreChange[] = [];
+        let teamScoresTx = { ...currentTeamScores };
 
         for (const plan of auraPlans) {
-          turnStartBonus += plan.delta;
-          logs.push(`TURN START: ${plan.reason} ${plan.delta >= 0 ? '+' : ''}${plan.delta}`);
+          const from = teamScoresTx[plan.team] ?? 0;
+          const to = from + plan.delta;
+          teamScoresTx = { ...teamScoresTx, [plan.team]: to };
+          auraChanges.push({
+            scope: 'TEAM',
+            target: `TEAM ${plan.team}`,
+            from,
+            to,
+            delta: plan.delta,
+            reason: `AURA: ${plan.reason}`,
+          });
         }
 
-        // Apply turn-start bonus to team score
-        const team = firstSinger.team;
-        const updatedTeamScores = {
-          A: team === 'A' ? (currentTeamScores.A ?? 0) + turnStartBonus : currentTeamScores.A ?? 0,
-          B: team === 'B' ? (currentTeamScores.B ?? 0) + turnStartBonus : currentTeamScores.B ?? 0,
-        };
+        const auraLines = auraChanges.map(fmtChangeLine);
+        const logs: string[] = [
+          `TURN START: ${firstSinger?.name || '???'} (TEAM ${firstSinger?.team || '?'})`,
+          ...auraLines.map((x) => ` - ${x}`),
+        ];
+
+        // Create overlay display
+        const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
+          const from = currentTeamScores[team] ?? 0;
+          const to = teamScoresTx[team] ?? 0;
+          const delta = to - from;
+          return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
+        });
 
         transaction.update(roomRef, {
           status: 'playing',
-          teamScores: updatedTeamScores,
+          teamScores: teamScoresTx,
           logs: [...(data.logs || []), ...logs],
+          lastLog: { timestamp: Date.now(), title: 'TURN START', detail: overlayTeamLines.join('\n') },
         });
       });
     } finally {
