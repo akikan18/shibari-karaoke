@@ -159,13 +159,14 @@ src/
 **ゲームロジックとUI層の分離**: `src/game/` ディレクトリにビジネスロジックを集約し、`src/components/` にUI層を配置することで、保守性と拡張性を向上させています。
 
 **1ファイル1ロールパターン**: 各ロールは2つの独立したファイルとして管理されています:
-- `roles/` - ロールの基本定義（名前、説明、初期値等）
+- `roles/` - ロールの基本定義（名前、能力説明、UI meta等）
 - `abilities/` - ロールの能力実装（SKILL/ULT/PASSIVE）
 
 新しいロールの追加は以下の手順で行います:
-1. `roles/newrole.ts` でロール定義を作成
-2. `abilities/newrole.ts` でハンドラー関数を実装
-3. 各ファイルの `index.ts` でエクスポート
+1. `roles/newrole.ts` でロール定義を作成（passive/skill/ult説明、tone/desc含む）
+2. `roles/index.ts` の `ALL_ROLES` 配列に追加
+3. `abilities/newrole.ts` でハンドラー関数を実装
+4. `abilities/index.ts` の各レジストリ（PASSIVE_HANDLERS, SKILL_HANDLERS等）に登録
 
 **能力ハンドラーパターン**: 全てのロール能力は統一されたインターフェース（`AbilityHandler`, `PassiveHandler`）を実装し、レジストリから取得して実行されます。これにより、メインロジックを変更せずに新しいロールを追加できます。
 
