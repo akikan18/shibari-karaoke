@@ -10,74 +10,9 @@ import { ScoreChange, TeamId } from '../game/team-battle/types';
 import { ALL_ROLES } from '../game/team-battle/roles';
 
 // --------------------
-// Role Definitions (Imported from central source)
+// Role Definitions (Imported from central source with UI meta)
 // --------------------
-const ROLE_DEFS = ALL_ROLES;
-
-// --------------------
-// ROLES (UI Meta)
-// --------------------
-const ROLE_UI_META = [
-  {
-    id: 'maestro',
-    tone: 'from-cyan-500/30 to-blue-600/10',
-    desc: '旋律を支配する絶対王者。ミス無き演奏が、天井知らずのスコアを叩き出す。',
-  },
-  {
-    id: 'showman',
-    tone: 'from-yellow-500/30 to-orange-600/10',
-    desc: '舞台を沸かすエンターテイナー。堅実な稼ぎと、ここ一番の爆発力を併せ持つ。',
-  },
-  {
-    id: 'ironwall',
-    tone: 'from-emerald-500/25 to-cyan-500/10',
-    desc: 'チームの盾となる守護神。たとえ歌が崩れても、その鉄壁は揺るがない。',
-  },
-  {
-    id: 'coach',
-    tone: 'from-purple-500/25 to-pink-500/10',
-    desc: '勝利の方程式を描く指揮官。個人の技量に関わらず、チーム全体を底上げする。',
-  },
-  {
-    id: 'oracle',
-    tone: 'from-indigo-500/25 to-cyan-500/10',
-    desc: '運命をハックする預言者。お題選びやイベントを操作し、盤面を支配する。',
-  },
-  {
-    id: 'mimic',
-    tone: 'from-slate-500/25 to-zinc-500/10',
-    desc: '変幻自在のトリックスター。他者の才能を模倣し、己の力として還元する。',
-  },
-  {
-    id: 'hype',
-    tone: 'from-rose-500/25 to-red-600/10',
-    desc: '会場のボルテージを上げる着火剤。歌唱力関係なし、勢いだけで場を制す。',
-  },
-  {
-    id: 'saboteur',
-    tone: 'from-red-500/20 to-orange-500/10',
-    desc: '影から崩す攪乱工作員。敵のペースを乱し、知らぬ間に勝利を奪い取る。',
-  },
-  {
-    id: 'underdog',
-    tone: 'from-amber-500/20 to-yellow-500/10',
-    desc: '逆境でこそ輝く反逆者。点差が開くほど牙を研ぎ、土壇場で全てを覆す。',
-  },
-  {
-    id: 'gambler',
-    tone: 'from-teal-500/20 to-emerald-500/10',
-    desc: 'スリルを愛する勝負師。丁か半か、その歌声ですべての運命を賭ける。',
-  },
-] as const;
-
-export const ROLES = ROLE_DEFS.map((def) => {
-  const ui = ROLE_UI_META.find((m) => m.id === def.id);
-  return {
-    ...def,
-    tone: ui?.tone ?? 'from-white/10 to-white/5',
-    desc: ui?.desc ?? '',
-  };
-}) as const;
+export const ROLES = ALL_ROLES;
 
 // --------------------
 // Animation Configuration
