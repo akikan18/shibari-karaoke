@@ -1215,7 +1215,11 @@ export const GamePlayTeamScreen = () => {
         const notes: string[] = [];
 
         const mitigateNegative = (team: TeamId, delta: number, reason: string) => {
-          return mitigateNegativeHelper(team, t, delta, reason, negZeroActive, negHalfActive, mems, sealedThisTurn, notes);
+          // Use the target team's buff status, not the current team's
+          const targetNegZeroActive = (teamBuffsTx?.[team]?.negZeroTurns ?? 0) > 0;
+          const targetNegHalfActive = !targetNegZeroActive && (teamBuffsTx?.[team]?.negHalfTurns ?? 0) > 0;
+          const targetSealed = (teamBuffsTx?.[team]?.sealedTurns ?? 0) > 0;
+          return mitigateNegativeHelper(team, t, delta, reason, targetNegZeroActive, targetNegHalfActive, mems, targetSealed, notes);
         };
 
         let singerTurnDelta = 0;
