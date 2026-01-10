@@ -9,7 +9,7 @@ export const handleCoachTurnStartPassive = (ctx: TurnStartPassiveContext): TurnS
 
   const coachInTeam = members.some((m) => m.team === team && m.role?.id === 'coach');
   if (coachInTeam) {
-    return { delta: 150, reason: 'COACH パッシブ' };
+    return { delta: 150, reason: 'COACH PASSIVE' };
   }
 
   return null;

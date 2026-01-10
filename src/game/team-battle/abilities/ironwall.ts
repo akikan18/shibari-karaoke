@@ -21,7 +21,7 @@ export const handleIronwallScoreModifier = (ctx: ScoreModifierContext): ScoreMod
   const mitigated = Math.ceil(delta * 0.7);
   return {
     modifiedDelta: mitigated,
-    note: `IRONWALL パッシブ (${delta} → ${mitigated})`
+    note: `IRONWALL PASSIVE (${delta} → ${mitigated})`
   };
 };
 

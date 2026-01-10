@@ -8,7 +8,7 @@ export const handleHypeTurnStartPassive = (ctx: TurnStartPassiveContext): TurnSt
   const { nextSinger } = ctx;
 
   if (nextSinger.role?.id === 'hype') {
-    return { delta: 400, reason: 'HYPE ENGINE パッシブ' };
+    return { delta: 400, reason: 'HYPE ENGINE PASSIVE' };
   }
 
   return null;

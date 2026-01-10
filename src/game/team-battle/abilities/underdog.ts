@@ -13,7 +13,7 @@ export const handleUnderdogTurnStartPassive = (ctx: TurnStartPassiveContext): Tu
     const oppTeam: TeamId = team === 'A' ? 'B' : 'A';
     const oppScore = teamScores[oppTeam];
     if (myScore < oppScore) {
-      return { delta: 500, reason: 'UNDERDOG パッシブ' };
+      return { delta: 500, reason: 'UNDERDOG PASSIVE' };
     }
   }
 
