@@ -1,4 +1,31 @@
-import { AbilityContext, AbilityResult } from './types';
+import type { AbilityContext, AbilityResult, PassiveContext, PassiveResult } from './types';
+
+/**
+ * Mimic PASSIVE: On success, +30% of last ally success
+ */
+export const handleMimicPassive = (ctx: PassiveContext): PassiveResult => {
+  const { singer, isSuccess, team, teamBuffs } = ctx;
+
+  const mimicSharedTurns = singer.buffs?.mimicPassiveTurns ?? 0;
+  const canUse = singer.role?.id === 'mimic' || mimicSharedTurns > 0;
+
+  if (canUse && isSuccess) {
+    const last = teamBuffs[team]?.lastTeamDelta ?? 0;
+    if (last > 0) {
+      const bonus = Math.round(last * 0.3);
+      const reason = singer.role?.id === 'mimic'
+        ? `MIMIC PASSIVE (30% of last ally success ${last})`
+        : `MIMIC PASSIVE (shared) (30% of last ally success ${last})`;
+
+      return {
+        scoreDelta: bonus,
+        reason,
+      };
+    }
+  }
+
+  return {};
+};
 
 /**
  * Mimic SKILL: Arm echo buff (copy 50% of last turn delta)

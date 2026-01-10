@@ -49,3 +49,34 @@ export type AbilityResult = {
  * Ability handler function type
  */
 export type AbilityHandler = (context: AbilityContext) => Promise<AbilityResult> | AbilityResult;
+
+/**
+ * Context for passive ability handlers
+ */
+export type PassiveContext = {
+  singer: any;
+  isSuccess: boolean;
+  sealed: boolean;
+  sabotaged: boolean;
+  team: TeamId;
+  enemyTeam: TeamId;
+  teamBuffs: any;
+  notes: string[];
+};
+
+/**
+ * Result from passive handlers
+ */
+export type PassiveResult = {
+  scoreDelta?: number;
+  reason?: string;
+  enemyScoreDelta?: number;
+  enemyReason?: string;
+  notes?: string[];
+  singerUpdates?: any;
+};
+
+/**
+ * Passive handler function type
+ */
+export type PassiveHandler = (context: PassiveContext) => PassiveResult;

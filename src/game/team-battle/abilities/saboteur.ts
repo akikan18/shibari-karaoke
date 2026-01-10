@@ -1,5 +1,21 @@
-import { AbilityContext, AbilityResult } from './types';
+import type { AbilityContext, AbilityResult, PassiveContext, PassiveResult } from './types';
 import { validateEnemyTarget } from './helpers';
+
+/**
+ * Saboteur PASSIVE: Enemy -300 on success
+ */
+export const handleSaboteurPassive = (ctx: PassiveContext): PassiveResult => {
+  const { isSuccess } = ctx;
+
+  if (isSuccess) {
+    return {
+      enemyScoreDelta: -300,
+      enemyReason: 'SABOTEUR PASSIVE (enemy -300 on success)',
+    };
+  }
+
+  return {};
+};
 
 /**
  * Saboteur SKILL: Sabotage enemy (success +0 / fail -1000)

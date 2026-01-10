@@ -1,4 +1,20 @@
-import { AbilityContext, AbilityResult } from './types';
+import type { AbilityContext, AbilityResult, PassiveContext, PassiveResult } from './types';
+
+/**
+ * Showman PASSIVE: +500 on success
+ */
+export const handleShowmanPassive = (ctx: PassiveContext): PassiveResult => {
+  const { isSuccess } = ctx;
+
+  if (isSuccess) {
+    return {
+      scoreDelta: 500,
+      reason: 'SHOWMAN PASSIVE (+500 on success)',
+    };
+  }
+
+  return {};
+};
 
 /**
  * Showman SKILL: Arm encore buff (+500 on success)
