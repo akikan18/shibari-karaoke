@@ -11,955 +11,50 @@ import { Toast, useToast } from '../components/Toast';
 import { usePresence } from '../hooks/usePresence';
 import { useWakeLock } from '../hooks/useWakeLock';
 
-// =========================
-// Config
-// =========================
-const BASE_SUCCESS = 1000;
-const BASE_FAIL = 0;
+// --- Game Logic & Types ---
+import { ALL_ROLES, RoleId, TeamId, getRoleById, getDefaultRoleUses } from '../game/team-battle/roles';
+import { LogKind, LogEntry, ScoreScope, ScoreChange } from '../game/team-battle/types';
+import {
+  BASE_SUCCESS,
+  BASE_FAIL,
+  clamp,
+  capLogs,
+  capEntries,
+  fmt,
+  fmtChangeLine,
+  iconOf,
+  kindColorClass,
+  formatTime,
+} from '../game/team-battle/utils';
+import {
+  sortByTurn,
+  computeTeamScores,
+  isReadyForTurn,
+  findNextReadyIndex,
+  findFirstReadyIndex,
+  normalizeTeamBuffs,
+  planStartAuras,
+} from '../game/team-battle/scoring';
+import {
+  ThemeCard,
+  cardTitle,
+  cardCriteria,
+  normalizeThemePool,
+  drawFromDeck,
+  shuffle,
+} from '../game/team-battle/theme';
+
+// --- UI Components ---
+import { ActionOverlay } from '../components/team-battle/overlays/ActionOverlay';
+import { AbilityFxOverlay, AbilityFx } from '../components/team-battle/overlays/AbilityFxOverlay';
+import { ConfirmModal, ConfirmState } from '../components/team-battle/modals/ConfirmModal';
+import { JoinTeamRoleModal } from '../components/team-battle/modals/JoinTeamRoleModal';
+import { TargetModal, TargetModalState } from '../components/team-battle/modals/TargetModal';
+import { GuideModal } from '../components/team-battle/modals/GuideModal';
+import { OracleUltPickModal, OracleUltPickState, OracleUltPickItem } from '../components/team-battle/modals/OracleUltPickModal';
+import { MissionDisplay } from '../components/team-battle/MissionDisplay';
 
-const MAX_LOGS = 80;
-const MAX_LOG_ENTRIES = 220;
 
-const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
-const capLogs = (logs: string[]) => logs.slice(Math.max(0, logs.length - MAX_LOGS));
-const capEntries = (entries: LogEntry[]) => entries.slice(Math.max(0, entries.length - MAX_LOG_ENTRIES));
-const fmt = (n: number) => (n >= 0 ? `+${n.toLocaleString()}` : `${n.toLocaleString()}`);
-
-// =========================
-// Theme Card
-// =========================
-type ThemeCard = string | { title: string; criteria?: string };
-
-const cardTitle = (c: ThemeCard | null | undefined) => {
-  if (!c) return '...';
-  return typeof c === 'string' ? c : c.title || '...';
-};
-
-const cardCriteria = (c: ThemeCard | null | undefined) => {
-  if (!c) return '...';
-  return typeof c === 'string' ? '—' : c.criteria || '—';
-};
-
-const DEFAULT_THEME_POOL: ThemeCard[] = [
-  { title: 'FREE THEME', criteria: '好きな曲でOK' },
-  { title: 'J-POP', criteria: 'J-POP を歌う' },
-  { title: 'アニソン', criteria: 'アニメ関連曲を歌う' },
-  { title: 'バラード', criteria: 'バラード系を歌う' },
-  { title: 'ロック', criteria: 'ロック系を歌う' },
-  { title: '盛り上げ', criteria: '場を盛り上げる曲' },
-  { title: '昭和', criteria: '昭和の曲' },
-  { title: '平成', criteria: '平成の曲' },
-  { title: '令和', criteria: '令和の曲' },
-  { title: '英語曲', criteria: '英語の曲' },
-];
-
-const shuffle = <T,>(arr: T[]) => {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
-const normalizeThemePool = (poolLike: any): ThemeCard[] => {
-  const pool = Array.isArray(poolLike) ? poolLike : [];
-  const normalized: ThemeCard[] = pool
-    .map((x: any) => {
-      if (!x) return null;
-      if (typeof x === 'string') return { title: x, criteria: '—' } as ThemeCard;
-      if (typeof x === 'object') {
-        const title = x.title ?? x.name ?? '';
-        const criteria = x.criteria ?? x.condition ?? x.clear ?? '—';
-        if (!title) return null;
-        return { title, criteria } as ThemeCard;
-      }
-      return null;
-    })
-    .filter(Boolean) as ThemeCard[];
-
-  return normalized.length > 0 ? normalized : DEFAULT_THEME_POOL;
-};
-
-const drawFromDeck = <T,>(deckLike: any, pool: T[], n: number) => {
-  let d: T[] = Array.isArray(deckLike) ? (deckLike as T[]).slice() : [];
-  const p = pool.slice();
-
-  const reshuffle = () => shuffle(p);
-
-  if (!d || d.length === 0) d = reshuffle();
-
-  const picks: T[] = [];
-  for (let i = 0; i < n; i++) {
-    if (d.length === 0) d = reshuffle();
-    const item = d.pop();
-    if (item !== undefined) picks.push(item);
-  }
-
-  if (n === 1) return { nextDeck: d, picked: picks[0] ?? null, choices: null as T[] | null };
-  return { nextDeck: d, picked: null as T | null, choices: picks };
-};
-
-// =========================
-// Roles
-// =========================
-type TeamId = 'A' | 'B';
-
-type RoleId =
-  | 'maestro'
-  | 'showman'
-  | 'ironwall'
-  | 'coach'
-  | 'oracle'
-  | 'mimic'
-  | 'hype'
-  | 'saboteur'
-  | 'underdog'
-  | 'gambler';
-
-type RoleDef = {
-  id: RoleId;
-  name: string;
-  type: 'ATK' | 'DEF' | 'SUP' | 'TEC';
-  sigil: string;
-  passive: string;
-  skill: string;
-  ult: string;
-};
-
-const ROLE_DEFS: RoleDef[] = [
-  {
-    id: 'maestro',
-    name: 'THE MAESTRO',
-    type: 'ATK',
-    sigil: '⬢',
-    passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
-    skill: 'SKILL：(3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
-    ult: 'ULT：(1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
-  },
-  {
-    id: 'showman',
-    name: 'SHOWMAN',
-    type: 'ATK',
-    sigil: '◆',
-    passive: 'PASSIVE：成功時、常時 +500。',
-    skill: 'SKILL：(3回) 成功時さらに+500（このターンのみ）',
-    ult: 'ULT：(1回) 成功なら敵チーム-2000（このターンのみ）',
-  },
-  {
-    id: 'ironwall',
-    name: 'IRON WALL',
-    type: 'DEF',
-    sigil: '▣',
-    passive: 'チームが受ける「マイナス」を30%軽減（歌唱の失敗0は対象外）。',
-    skill: 'SKILL：(3回) 次の自チームのターン、受けるマイナス-50%',
-    ult: 'ULT：(1回) 次の自チームのターン、受けるマイナスをすべて0',
-  },
-  {
-    id: 'coach',
-    name: 'THE COACH',
-    type: 'SUP',
-    sigil: '✚',
-    passive: '味方ターン開始時、チーム+150（歌唱結果に依存しない）。',
-    skill: 'SKILL：(3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
-    ult: 'ULT：(1回) 指定した味方は次のターン成功になる',
-  },
-  {
-    id: 'oracle',
-    name: 'ORACLE',
-    type: 'TEC',
-    sigil: '⟁',
-    passive: '自分のターンはお題3択。',
-    skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
-    ult: 'ULT：(1回) 次の相手チーム全員のお題を「ORACLE側が」3択から選んで確定（相手は選べない）',
-  },
-  {
-    id: 'mimic',
-    name: 'MIMIC',
-    type: 'TEC',
-    sigil: '◈',
-    passive: '直前の味方成功の獲得点30%を、自分成功時に上乗せ。',
-    skill: 'SKILL：(3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
-    // ✅ FIX: ユーザー仕様に合わせて更新
-    ult: 'ULT：(1回) 発動後、味方全員の「次の自分のターン」に MIMIC パッシブを付与（そのターンのみ）。',
-  },
-  {
-    id: 'hype',
-    name: 'HYPE ENGINE',
-    type: 'SUP',
-    sigil: '✦',
-    passive: '自分のターン開始時、チーム+400（結果に依存しない）。',
-    skill: 'SKILL：(3回) 選んだ味方の「次の2ターン成功時 +500」(1回)',
-    ult: 'ULT：(1回) 以降3ターン味方全員の成功スコア +500',
-  },
-  {
-    id: 'saboteur',
-    name: 'SABOTEUR',
-    type: 'TEC',
-    sigil: '☒',
-    passive: '自分成功で敵チーム-300。',
-    skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次の敵チーム全員の「次の自分の番」1回分、特殊効果をリセットしパッシブ/スキル/ULTを無効化（味方は対象外）',
-  },
-  {
-    id: 'underdog',
-    name: 'UNDERDOG',
-    type: 'DEF',
-    sigil: '⬟',
-    passive: '負けている時、自分のターン開始時に +500。',
-    skill: 'SKILL：(3回) 現在の点差の20%を相手から奪う（最大2000）。',
-    ult: 'ULT：(1回) 負けているとき：相手-2000まで追いつく／勝っているとき：チーム+2000',
-  },
-  {
-    id: 'gambler',
-    name: 'GAMBLER',
-    type: 'TEC',
-    sigil: '🎲',
-    // ✅ FIX: ユーザー仕様に合わせて更新
-    passive: 'PASSIVE：成功時に0〜1000のランダムで追加ボーナス。失敗時に0〜-1000からランダムで減点（100刻み）。',
-    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル使用時パッシブがマイナスなった場合でも0にとどまる。',
-    ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
-  },
-];
-
-const roleDef = (id?: RoleId) => ROLE_DEFS.find((r) => r.id === id);
-
-const defaultRoleUses = (_rid?: RoleId) => {
-  const skillUses = 3;
-  const ultUses = 1;
-  return { skillUses, ultUses };
-};
-
-// =========================
-// Logs (structured)
-// =========================
-type LogKind = 'SYSTEM' | 'TURN' | 'RESULT' | 'SKILL' | 'ULT';
-type LogEntry = {
-  ts: number;
-  kind: LogKind;
-  actorName?: string;
-  actorId?: string;
-  team?: TeamId;
-  title: string;
-  lines: string[];
-};
-
-type ScoreScope = 'PLAYER' | 'TEAM';
-type ScoreChange = {
-  scope: ScoreScope;
-  target: string;
-  from: number;
-  to: number;
-  delta: number;
-  reason: string;
-};
-
-const fmtChangeLine = (c: ScoreChange) => {
-  const arrow = '→';
-  return `${c.scope} ${c.target}: ${c.from.toLocaleString()} ${arrow} ${c.to.toLocaleString()} (${fmt(c.delta)}) [${c.reason}]`;
-};
-
-const iconOf = (k: LogKind) => {
-  if (k === 'RESULT') return '🎤';
-  if (k === 'SKILL') return '✨';
-  if (k === 'ULT') return '💥';
-  if (k === 'TURN') return '⏭️';
-  return '🧾';
-};
-
-const kindColorClass = (k: LogKind) => {
-  if (k === 'RESULT') return 'border-cyan-500/30 bg-cyan-500/10';
-  if (k === 'SKILL') return 'border-blue-500/30 bg-blue-500/10';
-  if (k === 'ULT') return 'border-yellow-500/30 bg-yellow-500/10';
-  if (k === 'TURN') return 'border-white/10 bg-white/5';
-  return 'border-white/10 bg-black/30';
-};
-
-const formatTime = (ts: number) => {
-  try {
-    const d = new Date(ts);
-    const hh = `${d.getHours()}`.padStart(2, '0');
-    const mm = `${d.getMinutes()}`.padStart(2, '0');
-    const ss = `${d.getSeconds()}`.padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
-  } catch {
-    return '';
-  }
-};
-
-// =========================
-// Turn Order Helpers
-// =========================
-const sortByTurn = (a: any, b: any) => (a.turnOrder ?? 9999) - (b.turnOrder ?? 9999);
-
-const computeTeamScores = (mems: any[]) => {
-  const A = mems.filter((m) => m.team === 'A').reduce((s, m) => s + (m.score ?? 0), 0);
-  const B = mems.filter((m) => m.team === 'B').reduce((s, m) => s + (m.score ?? 0), 0);
-  return { A, B };
-};
-
-const isReadyForTurn = (m: any) => (m?.team === 'A' || m?.team === 'B') && !!m?.role?.id;
-
-const findNextReadyIndex = (mems: any[], fromIndex: number) => {
-  const n = mems.length;
-  if (n === 0) return 0;
-  for (let offset = 1; offset <= n; offset++) {
-    const i = (fromIndex + offset) % n;
-    if (isReadyForTurn(mems[i])) return i;
-  }
-  return fromIndex;
-};
-
-const findFirstReadyIndex = (mems: any[]) => {
-  const n = mems.length;
-  for (let i = 0; i < n; i++) if (isReadyForTurn(mems[i])) return i;
-  return 0;
-};
-
-// =========================
-// TeamBuff normalize
-// =========================
-const normalizeTeamBuffs = (tbLike: any) => {
-  const A = tbLike?.A && typeof tbLike.A === 'object' ? tbLike.A : {};
-  const B = tbLike?.B && typeof tbLike.B === 'object' ? tbLike.B : {};
-  return { A: { ...A }, B: { ...B } };
-};
-
-// =========================
-// Turn Start Auras
-// =========================
-type AuraPlan = { team: TeamId; delta: number; reason: string };
-
-const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }, teamBuffs: any) => {
-  const plans: AuraPlan[] = [];
-  if (!nextSinger?.team) return plans;
-
-  const t: TeamId = nextSinger.team;
-  const et: TeamId = t === 'A' ? 'B' : 'A';
-
-  // チーム封印中(SEALED)はチームパッシブ系も無効化
-  const sealedTeam = (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
-  const sealedPersonal = !!nextSinger?.debuffs?.sealedOnce;
-  if (sealedTeam || sealedPersonal) return plans;
-
-  // coach passive
-  if (mems.some((m) => m.team === t && m.role?.id === 'coach')) plans.push({ team: t, delta: 150, reason: 'COACH PASSIVE (+150 at ally turn start)' });
-  // hype passive
-  if (nextSinger?.role?.id === 'hype') plans.push({ team: t, delta: 400, reason: 'HYPE PASSIVE (+400 at self turn start)' });
-  // underdog passive
-  if (nextSinger?.role?.id === 'underdog') {
-    if ((teamScores[t] ?? 0) < (teamScores[et] ?? 0)) plans.push({ team: t, delta: 500, reason: 'UNDERDOG PASSIVE (+500 when losing at self turn start)' });
-  }
-
-  return plans;
-};
-
-// =========================
-// Overlay: Turn Result (auto close)
-// =========================
-const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => void }) => {
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onCloseRef.current?.();
-    }, 2200);
-    return () => clearTimeout(timer);
-  }, [actionLog]);
-
-  if (!actionLog) return null;
-
-  const details = actionLog.detail ? String(actionLog.detail).split('\n') : [];
-  const limited = details.slice(0, 4);
-  const omitted = details.length - limited.length;
-
-  const isSuccess = String(actionLog.title || '').toUpperCase().includes('SUCCESS');
-  const headlineColor = isSuccess ? '#22c55e' : '#ef4444';
-
-  return (
-    <div className="fixed inset-0 z-[150] pointer-events-none flex items-center justify-center overflow-hidden">
-      <motion.div
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '-100%' }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="w-full bg-gradient-to-r from-black/80 via-black/95 to-black/80 border-y-2 border-white/20 py-6 md:py-9 flex flex-col items-center justify-center relative backdrop-blur-sm"
-      >
-        <div className="absolute inset-0 opacity-50" style={{ background: `radial-gradient(circle at 50% 50%, ${headlineColor}22, transparent 60%)` }} />
-
-        <div className="text-[10px] md:text-xs font-mono tracking-[0.4em] text-white/60">TURN RESULT</div>
-        <h2 className="text-2xl md:text-5xl font-black italic tracking-widest px-4 text-center mb-3" style={{ color: headlineColor, textShadow: `0 0 18px ${headlineColor}66` }}>
-          {actionLog.title}
-        </h2>
-
-        <div className="flex flex-col gap-2 items-center w-full px-4">
-          {limited.map((line: string, idx: number) => {
-            const isNegative = line.includes('(-') || line.includes(' -') || line.includes('(-');
-            const isTeam = line.startsWith('TEAM ');
-            const colorClasses = isTeam
-              ? isNegative
-                ? 'text-red-300 border-red-500/30 bg-red-900/20'
-                : 'text-cyan-200 border-cyan-500/30 bg-cyan-900/20'
-              : 'text-white border-white/10 bg-black/30';
-
-            return (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05 + idx * 0.05 }}
-                className={`text-sm md:text-2xl font-bold px-5 py-2 rounded-full border ${colorClasses}`}
-              >
-                {line}
-              </motion.div>
-            );
-          })}
-          {omitted > 0 && <div className="text-[10px] md:text-xs font-mono tracking-widest text-white/40">+{omitted} more (see LOG)</div>}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Overlay: SKILL/ULT (auto close)
-// =========================
-type AbilityFx = null | {
-  timestamp: number;
-  kind: 'SKILL' | 'ULT';
-  actorName: string;
-  roleName: string;
-  team?: TeamId;
-  title?: string;
-  subtitle?: string;
-};
-
-const AbilityFxOverlay = ({ fx, onDone }: { fx: AbilityFx; onDone: () => void }) => {
-  const onDoneRef = useRef(onDone);
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-
-  const ts = fx?.timestamp ?? 0;
-
-  useEffect(() => {
-    if (!fx || !ts) return;
-    const timer = setTimeout(() => {
-      onDoneRef.current?.();
-    }, 1400);
-    return () => clearTimeout(timer);
-  }, [ts]);
-
-  if (!fx) return null;
-
-  const isUlt = fx.kind === 'ULT';
-  const color = isUlt ? '#f59e0b' : '#06b6d4';
-  const shadow = isUlt ? 'rgba(245,158,11,0.55)' : 'rgba(6,182,212,0.55)';
-
-  return (
-    <div className="fixed inset-0 z-[170] pointer-events-none flex items-center justify-center">
-      <motion.div key={`fx-bg-${fx.timestamp}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85" />
-      <motion.div
-        key={`fx-burst-${fx.timestamp}`}
-        initial={{ scale: 0.7, opacity: 0, filter: 'blur(10px)' }}
-        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, scale: 1.05, filter: 'blur(8px)' }}
-        transition={{ duration: 0.35, ease: 'easeOut' }}
-        className="relative w-full max-w-5xl px-4"
-      >
-        <motion.div
-          initial={{ scale: 0.6, opacity: 0 }}
-          animate={{ scale: [0.6, 1.25], opacity: [0, 0.35, 0] }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
-          className="absolute inset-0 rounded-[999px]"
-          style={{ border: `2px solid ${color}66`, boxShadow: `0 0 70px ${shadow}` }}
-        />
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 1, 0] }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
-          className="absolute -inset-6"
-          style={{
-            background:
-              `radial-gradient(circle at 20% 30%, ${color}55 0%, transparent 40%),` +
-              `radial-gradient(circle at 80% 40%, ${color}33 0%, transparent 45%),` +
-              `radial-gradient(circle at 50% 75%, ${color}44 0%, transparent 50%)`,
-            filter: 'blur(18px)',
-          }}
-        />
-        <div className="relative mx-auto rounded-2xl border border-white/15 bg-black/40 backdrop-blur-md py-10 md:py-14 px-6 md:px-10 text-center overflow-hidden">
-          <div className="absolute inset-0 opacity-30" style={{ background: `linear-gradient(135deg, ${color}33, transparent)` }} />
-          <div className="relative z-10">
-            <div className="text-[10px] md:text-xs font-mono tracking-[0.3em] text-white/70">
-              {fx.team ? `TEAM ${fx.team} ・ ` : ''}
-              {fx.kind} ACTIVATED
-            </div>
-            <div className="mt-2 text-[clamp(2rem,6vw,5rem)] font-black italic tracking-tight" style={{ color, textShadow: `0 0 28px ${shadow}` }}>
-              {fx.kind}
-            </div>
-            <div className="mt-2 text-white/90 font-black tracking-widest text-base md:text-2xl">{fx.actorName}</div>
-            <div className="mt-1 text-white/60 font-mono text-xs md:text-sm tracking-widest">{fx.roleName}</div>
-            {(fx.title || fx.subtitle) && (
-              <div className="mt-3 text-[11px] md:text-sm text-white/70 font-mono tracking-widest">
-                {fx.title && <div>{fx.title}</div>}
-                {fx.subtitle && <div className="opacity-80">{fx.subtitle}</div>}
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Generic Confirm Modal
-// =========================
-type ConfirmState =
-  | null
-  | {
-      title: string;
-      body: React.ReactNode;
-      confirmText?: string;
-      cancelText?: string;
-      danger?: boolean;
-      onConfirm: () => Promise<void> | void;
-    };
-
-const ConfirmModal = ({ state, busy, onClose }: { state: ConfirmState; busy: boolean; onClose: () => void }) => {
-  if (!state) return null;
-
-  return (
-    <div className="fixed inset-0 z-[260] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative w-full max-w-lg rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-6 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="text-xl font-black tracking-widest text-white">{state.title}</div>
-          <div className="mt-3 text-sm text-white/70 leading-relaxed">{state.body}</div>
-
-          <div className="mt-6 flex gap-3">
-            <button
-              disabled={busy}
-              onClick={onClose}
-              className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 font-bold tracking-widest text-xs"
-            >
-              {state.cancelText || 'CANCEL'}
-            </button>
-            <button
-              disabled={busy}
-              onClick={async () => {
-                await state.onConfirm();
-              }}
-              className={`flex-1 py-3 rounded-xl font-black tracking-widest text-xs transition-all ${
-                state.danger
-                  ? 'bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500'
-                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500'
-              }`}
-            >
-              {busy ? 'PROCESSING...' : state.confirmText || 'CONFIRM'}
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Join Wizard (mid-join team/role)
-// =========================
-const JoinTeamRoleModal = ({
-  isOpen,
-  step,
-  busy,
-  teamCounts,
-  usedRoleIds,
-  onPickTeam,
-  onPickRole,
-  onBack,
-}: {
-  isOpen: boolean;
-  step: 'team' | 'role';
-  busy: boolean;
-  teamCounts: { A: number; B: number };
-  usedRoleIds: Set<RoleId>;
-  onPickTeam: (t: TeamId) => void;
-  onPickRole: (r: RoleId) => void;
-  onBack: () => void;
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
-      <motion.div initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="relative w-full max-w-3xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden">
-        <div className="rounded-xl p-6 md:p-8 bg-gradient-to-b from-white/5 to-black/40">
-          {step === 'team' ? (
-            <>
-              <h2 className="text-xl md:text-2xl font-black tracking-widest text-cyan-300 italic">SELECT TEAM</h2>
-              <p className="text-xs text-white/50 font-mono mt-2">途中参加のため、まずチームを選んでください</p>
-
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button disabled={busy} onClick={() => onPickTeam('A')} className="p-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all text-left">
-                  <div className="text-sm font-black tracking-widest">TEAM A</div>
-                  <div className="text-[10px] font-mono text-white/50 mt-1">PLAYERS: {teamCounts.A}</div>
-                </button>
-
-                <button disabled={busy} onClick={() => onPickTeam('B')} className="p-5 rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all text-left">
-                  <div className="text-sm font-black tracking-widest">TEAM B</div>
-                  <div className="text-[10px] font-mono text-white/50 mt-1">PLAYERS: {teamCounts.B}</div>
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-black tracking-widest text-yellow-300 italic">SELECT ROLE</h2>
-                  <p className="text-xs text-white/50 font-mono mt-2">既存プレイヤーが使用中のロールは選択できません</p>
-                </div>
-                <button disabled={busy} onClick={onBack} className="px-3 py-2 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 text-xs">
-                  BACK
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
-                {ROLE_DEFS.map((r) => {
-                  const used = usedRoleIds.has(r.id);
-                  return (
-                    <button
-                      key={r.id}
-                      disabled={busy || used}
-                      onClick={() => onPickRole(r.id)}
-                      className={`p-4 rounded-xl border transition-all text-left ${
-                        used ? 'border-white/5 bg-black/20 opacity-50 cursor-not-allowed' : 'border-white/10 bg-black/30 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{r.sigil}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <div className="font-black truncate">{r.name}</div>
-                            {used && <span className="text-[9px] font-black px-2 py-0.5 rounded bg-red-900/50 border border-red-500/30 text-red-300">USED</span>}
-                          </div>
-                          <div className="text-[10px] font-mono tracking-widest text-white/40">TYPE: {r.type}</div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {busy && <div className="mt-4 text-[10px] text-cyan-300 font-mono tracking-widest animate-pulse">PROCESSING...</div>}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Target Modal (ability target choose)
-// =========================
-type TargetModalState = null | {
-  title: string;
-  mode: 'ally' | 'enemy';
-  action: 'coach_timeout' | 'coach_ult' | 'saboteur_sabotage' | 'oracle_reroll' | 'hype_boost';
-};
-
-const TargetModal = ({
-  isOpen,
-  title,
-  busy,
-  targets,
-  onClose,
-  onPick,
-}: {
-  isOpen: boolean;
-  title: string;
-  busy: boolean;
-  targets: any[];
-  onClose: () => void;
-  onPick: (id: string) => void;
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="relative w-full max-w-lg rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden">
-        <div className="rounded-xl p-5 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-lg font-black tracking-wider">{title}</div>
-            <button className="px-3 py-1 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 text-xs" onClick={onClose} disabled={busy}>
-              CLOSE
-            </button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {targets.map((m: any) => (
-              <button key={m.id} disabled={busy} onClick={() => onPick(m.id)} className="p-3 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 text-left transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{m.avatar}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold truncate">{m.name}</div>
-                    <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">
-                      TEAM {m.team} ・ ROLE {m.role?.name || '—'}
-                    </div>
-                  </div>
-                </div>
-              </button>
-            ))}
-            {targets.length === 0 && <div className="text-[12px] text-white/50 font-mono tracking-widest">NO VALID TARGET</div>}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Guide Modal
-// =========================
-const GuideModal = ({
-  open,
-  onClose,
-  members,
-  usedRoleIds,
-}: {
-  open: boolean;
-  onClose: () => void;
-  members: any[];
-  usedRoleIds: Set<RoleId>;
-}) => {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[255] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 20, scale: 0.96 }}
-        className="relative w-full max-w-4xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-5 md:p-6 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xl md:text-2xl font-black tracking-widest text-cyan-200">GUIDE</div>
-              <div className="text-[11px] font-mono tracking-widest text-white/50 mt-1">参加メンバーのロール説明（途中参加・ゲスト・オフライン含む）</div>
-            </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center">
-              ✕
-            </button>
-          </div>
-
-          <div className="mt-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 space-y-3">
-            {members.map((m) => {
-              const rid: RoleId | undefined = m.role?.id;
-              const def = rid ? roleDef(rid) : null;
-              const isGuest = String(m.id).startsWith('guest_');
-              const team = m.team || '?';
-              const roleName = m.role?.name || (rid ? def?.name : 'NO ROLE');
-              const usedBadge = rid && usedRoleIds.has(rid) ? 'USED' : null;
-
-              return (
-                <div key={m.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">
-                      {m.avatar || '🎤'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="font-black truncate">{m.name || 'PLAYER'}</div>
-                        {isGuest && <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded font-black">GUEST</span>}
-                        {m.team === 'A' && <span className="text-[9px] bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 px-2 py-0.5 rounded font-black">TEAM A</span>}
-                        {m.team === 'B' && <span className="text-[9px] bg-red-500/20 text-red-200 border border-red-500/30 px-2 py-0.5 rounded font-black">TEAM B</span>}
-                      </div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/50 truncate">
-                        ROLE: <span className="text-white/80">{roleName}</span>
-                        {usedBadge && <span className="ml-2 text-[9px] px-2 py-0.5 rounded bg-white/5 border border-white/10">IN USE</span>}
-                      </div>
-                    </div>
-                    <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">{team !== '?' ? `TEAM ${team}` : 'TEAM ?'}</div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">PASSIVE</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.passive || '未選択 / ロール未決定'}</div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">SKILL</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.skill || '—'}</div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">ULT</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.ult || '—'}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {members.length === 0 && <div className="text-[11px] text-white/40 font-mono tracking-widest">NO MEMBERS</div>}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Mission Display
-// =========================
-const MissionDisplay = React.memo(({ title, criteria, stateText }: any) => {
-  const displayTitle = stateText || title;
-
-  const getTitleStyle = (text: string) => {
-    const len = (text || '').length;
-    if (len > 50) return 'text-[clamp(0.9rem,3.5vw,1.5rem)]';
-    if (len > 30) return 'text-[clamp(1.1rem,4.5vw,2rem)]';
-    if (len > 15) return 'text-[clamp(1.4rem,6vw,3rem)]';
-    return 'text-[clamp(2rem,8vw,5rem)]';
-  };
-
-  return (
-    <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
-      <div className="w-full flex flex-col items-center mt-1 md:mt-2 px-2 overflow-visible">
-        <div className="inline-block px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono tracking-[0.2em] text-[8px] md:text-xs mb-1 md:mb-2 font-bold">
-          CURRENT THEME
-        </div>
-
-        <div className="w-full px-1">
-          <h1 className={`font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.35)] leading-tight w-full whitespace-pre-wrap break-words text-center [text-wrap:balance] ${getTitleStyle(displayTitle)}`}>
-            {displayTitle}
-          </h1>
-        </div>
-      </div>
-
-      <div className="w-full flex justify-center mt-2 md:mt-4">
-        <div className="w-auto max-w-full bg-gradient-to-br from-red-900/40 to-black/40 border border-red-500/50 px-4 py-2 md:px-10 md:py-6 rounded-xl backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)] flex flex-col items-center gap-0.5">
-          <p className="text-red-300 font-mono tracking-[0.2em] text-[8px] md:text-xs uppercase opacity-90 font-bold whitespace-nowrap">Clear Condition</p>
-          <p className="font-black text-white tracking-widest text-[clamp(1.2rem,4vw,3rem)] md:text-[3rem] whitespace-pre-wrap break-words">{criteria}</p>
-        </div>
-      </div>
-    </motion.div>
-  );
-});
-
-// =========================
-// ORACLE ULT pick (ORACLE side chooses enemy themes)
-// =========================
-type OracleUltPickItem = {
-  targetId: string;
-  targetName: string;
-  team: TeamId;
-  choices: ThemeCard[];
-};
-
-type OracleUltPickState = null | {
-  active: true;
-  createdAt: number;
-  byId: string;
-  byName: string;
-  targetTeam: TeamId; // enemy team
-  idx: number; // current pick index
-  items: OracleUltPickItem[];
-};
-
-const OracleUltPickModal = ({
-  state,
-  busy,
-  canControl,
-  onClose,
-  onPick,
-}: {
-  state: OracleUltPickState;
-  busy: boolean;
-  canControl: boolean;
-  onClose: () => void;
-  onPick: (targetId: string, cand: ThemeCard) => void;
-}) => {
-  if (!state) return null;
-  const item = state.items?.[state.idx];
-  if (!item) return null;
-
-  return (
-    <div className="fixed inset-0 z-[245] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative w-full max-w-5xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-6 md:p-8 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xs font-mono tracking-widest text-yellow-300">ORACLE ULT</div>
-              <div className="text-2xl md:text-3xl font-black tracking-tight text-white mt-1">CHOOSE ENEMY THEME</div>
-              <div className="text-[11px] md:text-xs font-mono tracking-widest text-white/50 mt-1">
-                {state.byName} が選択中（敵は選択できません） / {state.idx + 1} / {state.items.length}
-              </div>
-            </div>
-            <button
-              disabled={busy}
-              onClick={onClose}
-              className="px-3 py-2 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 text-xs font-black tracking-widest"
-            >
-              CLOSE
-            </button>
-          </div>
-
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-4">
-            <div className="text-[10px] font-mono tracking-widest text-white/40">TARGET</div>
-            <div className="text-white font-black mt-1">
-              {item.targetName} <span className="text-white/50 text-sm font-mono">/ TEAM {item.team}</span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-            {item.choices.map((cand, i) => (
-              <button
-                key={`${item.targetId}-${i}-${cardTitle(cand)}`}
-                disabled={busy || !canControl}
-                onClick={() => onPick(item.targetId, cand)}
-                className={`p-4 rounded-2xl border text-left transition-all ${
-                  busy || !canControl ? 'border-white/10 bg-black/20 opacity-60 cursor-not-allowed' : 'border-yellow-500/30 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-[1.01]'
-                }`}
-              >
-                <div className="text-[9px] font-mono tracking-widest text-yellow-200">OPTION {i + 1}</div>
-                <div className="mt-1 text-white font-black break-words">{cardTitle(cand)}</div>
-                <div className="mt-1 text-[11px] text-white/60 font-mono break-words">{cardCriteria(cand)}</div>
-              </button>
-            ))}
-          </div>
-
-          {!canControl && (
-            <div className="mt-4 text-[10px] font-mono tracking-widest text-red-300 border border-red-500/30 bg-red-500/10 px-3 py-2 rounded-xl">
-              YOU CANNOT CONTROL THIS ORACLE PICK
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Main Screen
-// =========================
 export const GamePlayTeamScreen = () => {
   const navigate = useNavigate();
   const { messages, addToast, removeToast } = useToast();
@@ -1201,7 +296,7 @@ export const GamePlayTeamScreen = () => {
 
         mems = mems.map((m: any) => {
           const rid: RoleId | undefined = m.role?.id;
-          const defUses = defaultRoleUses(rid);
+          const defUses = getDefaultRoleUses(rid);
           const prevSkill = m.role?.skillUses;
           const prevUlt = m.role?.ultUses;
 
@@ -1332,7 +427,7 @@ export const GamePlayTeamScreen = () => {
 
   // ★ IMPORTANT: DBにultUsesが無い(古いデータ)でも、UI側はデフォルト値でボタンを押せるようにする
   const currentRoleId = (currentSinger?.role?.id as RoleId | undefined) || undefined;
-  const defaultsForCurrent = defaultRoleUses(currentRoleId);
+  const defaultsForCurrent = getDefaultRoleUses(currentRoleId);
   const skillUsesLeft = currentSinger?.role ? (currentSinger.role.skillUses ?? defaultsForCurrent.skillUses) : 0;
   const ultUsesLeft = currentSinger?.role ? (currentSinger.role.ultUses ?? defaultsForCurrent.ultUses) : 0;
 
@@ -1629,7 +724,7 @@ export const GamePlayTeamScreen = () => {
   };
 
   const requestPickRole = (roleId: RoleId) => {
-    const def = ROLE_DEFS.find((r) => r.id === roleId);
+    const def = getRoleById(roleId);
     if (!def) return;
 
     if (usedRoleIds.has(roleId)) {
@@ -1727,7 +822,7 @@ export const GamePlayTeamScreen = () => {
 
   const saveMyRole = async (roleId: RoleId) => {
     if (!roomId || !userId) return;
-    const def = ROLE_DEFS.find((r) => r.id === roleId);
+    const def = getRoleById(roleId);
     if (!def) return;
 
     setBusy(true);
@@ -1752,7 +847,7 @@ export const GamePlayTeamScreen = () => {
         if (used.has(def.id)) throw new Error('RoleAlreadyUsed');
 
         const updated = { ...(mems[idx] || {}) };
-        const uses = defaultRoleUses(def.id);
+        const uses = getDefaultRoleUses(def.id);
         updated.role = { id: def.id, name: def.name, skillUses: uses.skillUses, ultUses: uses.ultUses };
         updated.score = updated.score ?? 0;
         updated.combo = updated.combo ?? 0;
@@ -1806,7 +901,7 @@ export const GamePlayTeamScreen = () => {
     if (rid === 'oracle') return setTargetModal({ title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' });
     if (rid === 'hype') return setTargetModal({ title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' });
 
-    const def = roleDef(rid);
+    const def = getRoleById(rid);
     setConfirmState({
       title: 'CONFIRM SKILL',
       body: (
@@ -1837,7 +932,7 @@ export const GamePlayTeamScreen = () => {
     if (rid === 'coach') return setTargetModal({ title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' });
 
     // ✅ FIX: MIMIC ULTはターゲット不要（味方全員に次ターンMIMICパッシブ付与）
-    const def = roleDef(rid);
+    const def = getRoleById(rid);
     setConfirmState({
       title: 'CONFIRM ULT',
       body: (
@@ -1863,7 +958,7 @@ export const GamePlayTeamScreen = () => {
     const target = sortedMembers.find((m) => m.id === targetId);
     if (!target) return;
 
-    const effectiveRoleName = roleDef(rid)?.name || 'ROLE';
+    const effectiveRoleName = getRoleById(rid)?.name || 'ROLE';
 
     const kind = action === 'coach_ult' ? 'ult' : 'skill';
     const title = kind === 'ult' ? 'CONFIRM ULT TARGET' : 'CONFIRM SKILL TARGET';
@@ -1931,7 +1026,7 @@ export const GamePlayTeamScreen = () => {
         const mems = (data.members || [])
           .map((m: any) => {
             const rid: RoleId | undefined = m.role?.id;
-            const uses = defaultRoleUses(rid);
+            const uses = getDefaultRoleUses(rid);
             const role = m.role
               ? {
                   ...m.role,
@@ -2294,7 +1389,7 @@ export const GamePlayTeamScreen = () => {
         let mems = (data.members || [])
           .map((m: any) => {
             const rid: RoleId | undefined = m.role?.id;
-            const uses = defaultRoleUses(rid);
+            const uses = getDefaultRoleUses(rid);
             const role = m.role
               ? {
                   ...m.role,
