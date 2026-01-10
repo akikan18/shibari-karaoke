@@ -7,112 +7,12 @@ import { useWakeLock } from '../hooks/useWakeLock';
 import { planStartAuras, normalizeTeamBuffs } from '../game/team-battle/scoring';
 import { fmt, fmtChangeLine } from '../game/team-battle/utils';
 import { ScoreChange, TeamId } from '../game/team-battle/types';
+import { ALL_ROLES } from '../game/team-battle/roles';
 
 // --------------------
-// Role Definitions (Updated)
+// Role Definitions (Imported from central source)
 // --------------------
-type RoleDef = {
-  id: string;
-  name: string;
-  type: 'ATK' | 'DEF' | 'SUP' | 'TEC';
-  sigil: string;
-  passive: string;
-  skill: string;
-  ult: string;
-};
-
-const ROLE_DEFS: RoleDef[] = [
-  {
-    id: 'maestro',
-    name: 'THE MAESTRO',
-    type: 'ATK',
-    sigil: '⬢',
-    passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
-    skill: 'SKILL：(3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
-    ult: 'ULT：(1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
-  },
-  {
-    id: 'showman',
-    name: 'SHOWMAN',
-    type: 'ATK',
-    sigil: '◆',
-    passive: 'PASSIVE：成功時、常時 +500。',
-    skill: 'SKILL：(3回) 成功時さらに+500（このターンのみ）',
-    ult: 'ULT：(1回) 成功なら敵チーム-2000（このターンのみ）',
-  },
-  {
-    id: 'ironwall',
-    name: 'IRON WALL',
-    type: 'DEF',
-    sigil: '▣',
-    passive: 'チームが受ける「マイナス」を30%軽減（歌唱の失敗0は対象外）。',
-    skill: 'SKILL：(3回) 次の自チームのターン、受けるマイナス-50%',
-    ult: 'ULT：(1回) 次の自チームのターン、受けるマイナスをすべて0',
-  },
-  {
-    id: 'coach',
-    name: 'THE COACH',
-    type: 'SUP',
-    sigil: '✚',
-    passive: '味方ターン開始時、チーム+150（歌唱結果に依存しない）。',
-    skill: 'SKILL：(3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
-    ult: 'ULT：(1回) 指定した味方は「次のターン成功」になる',
-  },
-  {
-    id: 'oracle',
-    name: 'ORACLE',
-    type: 'TEC',
-    sigil: '⟁',
-    passive: '自分のターンはお題3択。',
-    skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
-    ult: 'ULT：(1回) 次のターンの相手チームのお題を全員分引き直す（3択：1番目は現在のお題）',
-  },
-  {
-    id: 'mimic',
-    name: 'MIMIC',
-    type: 'TEC',
-    sigil: '◈',
-    passive: '直前の味方成功の獲得点30%を、自分成功時に上乗せ。',
-    skill: 'SKILL：(3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
-    ult: 'ULT：(1回) STEAL SKILL：敵ロールのSKILLを1回コピーして発動（必要ならターゲット選択あり）',
-  },
-  {
-    id: 'hype',
-    name: 'HYPE ENGINE',
-    type: 'SUP',
-    sigil: '✦',
-    passive: '自分のターン開始時、チーム+400（結果に依存しない）。',
-    skill: 'SKILL：(3回) 選んだ味方の「次の2ターン成功時 +500」(1回)',
-    ult: 'ULT：(1回) 以降3ターン味方全員の成功スコア +500',
-  },
-  {
-    id: 'saboteur',
-    name: 'SABOTEUR',
-    type: 'TEC',
-    sigil: '☒',
-    passive: '自分成功で敵チーム-300。',
-    skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次のターン、敵チームの特殊効果をリセットしパッシブ、スキル、ウルトを無効化',
-  },
-  {
-    id: 'underdog',
-    name: 'UNDERDOG',
-    type: 'DEF',
-    sigil: '⬟',
-    passive: '負けている時、自分のターン開始時に +500。',
-    skill: 'SKILL：(3回) 現在の点差の20%を相手から奪う（最大2000）。',
-    ult: 'ULT：(1回) 負けているとき：相手-2000まで追いつく／勝っているとき：チーム+2000',
-  },
-  {
-    id: 'gambler',
-    name: 'GAMBLER',
-    type: 'TEC',
-    sigil: '🎲',
-    passive: 'PASSIVE：成功時に -500〜1500 の追加ボーナスを抽選（250刻み）。',
-    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル中はPASSIVEがマイナスでも0に止まる。',
-    ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
-  },
-];
+const ROLE_DEFS = ALL_ROLES;
 
 // --------------------
 // ROLES (UI Meta)
