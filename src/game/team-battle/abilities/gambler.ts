@@ -48,16 +48,16 @@ export const handleGamblerSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Gambler ULT: HIGH STAKES - Triple or nothing
+ * Gambler ULT: Coinflip armed (+5000 / -1000)
  */
 export const handleGamblerUlt = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.highStakes = true;
+  singer.buffs.gamblerUlt = true;
 
   return {
     success: true,
     members: ctx.members,
-    logs: [`ULT GAMBLER: HIGH STAKES armed (success x3 / fail -3000)`],
+    logs: [`ULT GAMBLER: coinflip armed (+5000 / -1000)`],
   };
 };

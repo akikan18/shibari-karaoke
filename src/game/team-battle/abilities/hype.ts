@@ -41,9 +41,10 @@ export const handleHypeUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs } = ctx;
 
   const updatedTeamBuffs = {
-    ...teamBuffs,
-    [team]: { ...(teamBuffs[team] || {}), hypeUltTurns: 3 },
+    A: { ...(teamBuffs.A || {}) },
+    B: { ...(teamBuffs.B || {}) },
   };
+  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), hypeUltTurns: 3 };
 
   return {
     success: true,

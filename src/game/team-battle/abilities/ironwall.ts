@@ -32,9 +32,10 @@ export const handleIronwallSkill = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs } = ctx;
 
   const updatedTeamBuffs = {
-    ...teamBuffs,
-    [team]: { ...(teamBuffs[team] || {}), negHalfTurns: 1, negZeroTurns: 0 },
+    A: { ...(teamBuffs.A || {}) },
+    B: { ...(teamBuffs.B || {}) },
   };
+  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negHalfTurns: 1, negZeroTurns: 0 };
 
   return {
     success: true,
@@ -51,9 +52,10 @@ export const handleIronwallUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs } = ctx;
 
   const updatedTeamBuffs = {
-    ...teamBuffs,
-    [team]: { ...(teamBuffs[team] || {}), negZeroTurns: 1, negHalfTurns: 0 },
+    A: { ...(teamBuffs.A || {}) },
+    B: { ...(teamBuffs.B || {}) },
   };
+  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negZeroTurns: 1, negHalfTurns: 0 };
 
   return {
     success: true,
