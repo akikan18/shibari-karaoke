@@ -5,7 +5,7 @@ export const HypeRole: RoleDef = {
   name: 'HYPE ENGINE',
   type: 'SUP',
   sigil: '✦',
-  passive: '自分のターン開始時、チーム+400（結果に依存しない）。',
-  skill: 'SKILL：(3回) 選んだ味方の「次の2ターン成功時 +500」(1回)',
-  ult: 'ULT：(1回) 以降3ターン味方全員の成功スコア +500',
+  passive: 'VIBE：自分のターン開始時、チーム+400（結果に依存しない）。',
+  skill: 'HYPE BOOST：選んだ味方の「次の2ターン成功時 +500」(1回)',
+  ult: 'ROAR：以降3ターン味方全員の成功スコア +500',
 };
