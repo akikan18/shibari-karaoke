@@ -44,14 +44,17 @@ export const handleSaboteurUlt = (ctx: AbilityContext): AbilityResult => {
   const { members, team, enemyTeam, teamBuffs, singer } = ctx;
 
   // Reset enemy team buffs
-  teamBuffs[enemyTeam] = {
-    ...(teamBuffs[enemyTeam] || {}),
-    lastTeamDelta: 0,
-    nextSuccessBonus: 0,
-    hypeUltTurns: 0,
-    negHalfTurns: 0,
-    negZeroTurns: 0,
-    sealedTurns: 0,
+  const updatedTeamBuffs = {
+    ...teamBuffs,
+    [enemyTeam]: {
+      ...(teamBuffs[enemyTeam] || {}),
+      lastTeamDelta: 0,
+      nextSuccessBonus: 0,
+      hypeUltTurns: 0,
+      negHalfTurns: 0,
+      negZeroTurns: 0,
+      sealedTurns: 0,
+    },
   };
 
   // Seal all enemies
@@ -77,7 +80,7 @@ export const handleSaboteurUlt = (ctx: AbilityContext): AbilityResult => {
   return {
     success: true,
     members,
-    teamBuffs,
+    teamBuffs: updatedTeamBuffs,
     logs,
   };
 };

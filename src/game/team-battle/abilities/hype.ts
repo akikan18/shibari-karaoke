@@ -40,12 +40,15 @@ export const handleHypeSkill = (ctx: AbilityContext): AbilityResult => {
 export const handleHypeUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs } = ctx;
 
-  teamBuffs[team] = { ...(teamBuffs[team] || {}), hypeUltTurns: 3 };
+  const updatedTeamBuffs = {
+    ...teamBuffs,
+    [team]: { ...(teamBuffs[team] || {}), hypeUltTurns: 3 },
+  };
 
   return {
     success: true,
     members: ctx.members,
-    teamBuffs,
+    teamBuffs: updatedTeamBuffs,
     logs: [`ULT HYPE: allies success +500 for 3 turns`],
   };
 };

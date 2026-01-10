@@ -57,7 +57,10 @@ export const handleMaestroUlt = (ctx: AbilityContext): AbilityResult => {
 
   // Add next success bonus
   const currentBonus = teamBuffs[team]?.nextSuccessBonus ?? 0;
-  teamBuffs[team] = { ...(teamBuffs[team] || {}), nextSuccessBonus: currentBonus + 500 };
+  const updatedTeamBuffs = {
+    ...teamBuffs,
+    [team]: { ...(teamBuffs[team] || {}), nextSuccessBonus: currentBonus + 500 },
+  };
 
   // Create score change for team gain
   const scoreChanges = gain > 0 ? [{
@@ -72,7 +75,7 @@ export const handleMaestroUlt = (ctx: AbilityContext): AbilityResult => {
   return {
     success: true,
     members: ctx.members,
-    teamBuffs,
+    teamBuffs: updatedTeamBuffs,
     scoreChanges,
     logs: [`ULT MAESTRO: FINALE team +${gain}, next success +500`],
     logEntries: [
