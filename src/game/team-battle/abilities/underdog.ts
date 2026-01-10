@@ -57,7 +57,7 @@ export const handleUnderdogSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Underdog ULT: Catch up to opponent or gain bonus if winning
+ * Underdog ULT: Choose better option between catching up to opp-2000 or +2000
  */
 export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, enemyTeam, teamScores } = ctx;
@@ -65,20 +65,21 @@ export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const myScore = teamScores[team] ?? 0;
   const oppScore = teamScores[enemyTeam] ?? 0;
 
-  let delta = 0;
-  let reason = '';
-  let logMessage = '';
+  // Calculate both options
+  const targetScore = oppScore - 2000;
+  const catchUpDelta = targetScore - myScore;
+  const flatBonus = 2000;
 
-  if (myScore < oppScore) {
-    const targetScore = oppScore - 2000;
-    delta = Math.max(0, targetScore - myScore);
-    reason = 'UNDERDOG ULT (catch up to opp-2000)';
-    logMessage = `ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`;
-  } else {
-    delta = 2000;
-    reason = 'UNDERDOG ULT (winning: +2000)';
-    logMessage = `ULT UNDERDOG: winning => team +2000`;
-  }
+  // Choose the better option (Math.max handles negative catchUpDelta)
+  const delta = Math.max(catchUpDelta, flatBonus);
+
+  const reason = delta === catchUpDelta
+    ? 'UNDERDOG ULT (catch up to opp-2000)'
+    : 'UNDERDOG ULT (+2000)';
+
+  const logMessage = delta === catchUpDelta
+    ? `ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`
+    : `ULT UNDERDOG: +2000`;
 
   const scoreChanges: ScoreChange[] = delta > 0 ? [{
     scope: 'TEAM',
