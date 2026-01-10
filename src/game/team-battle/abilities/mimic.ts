@@ -31,17 +31,35 @@ export const handleMimicPassive = (ctx: PassiveContext): PassiveResult => {
 };
 
 /**
- * Mimic SKILL: Arm echo buff (copy 50% of last turn delta)
+ * Mimic SKILL: Copy 50% of last turn delta immediately
  */
 export const handleMimicSkill = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.echo = true;
+  // MIMIC skill needs access to the last turn delta at activation time
+  // For now, we'll store it in the singer's buffs when available
+  // The actual score calculation will happen when we have the last turn data
+  const lastTurn = singer.lastTurnDelta ?? 0;
+  const add = Math.round(lastTurn * 0.5);
+
+  // Apply score immediately to the singer
+  const currentScore = singer.score ?? 0;
+  singer.score = currentScore + add;
+
+  const scoreChanges = [{
+    scope: 'PLAYER' as const,
+    target: singer.name,
+    from: currentScore,
+    to: currentScore + add,
+    delta: add,
+    reason: `MIMIC SKILL (ECHO 50% of last turn ${lastTurn >= 0 ? '+' : ''}${lastTurn})`,
+  }];
 
   return {
     success: true,
     members: ctx.members,
-    logs: [`SKILL MIMIC: ECHO armed (copy 50% last turn delta)`],
+    scoreChanges,
+    logs: [`SKILL MIMIC: ECHO ${add >= 0 ? '+' : ''}${add} (50% of last turn ${lastTurn >= 0 ? '+' : ''}${lastTurn})`],
   };
 };
 

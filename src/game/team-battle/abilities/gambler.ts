@@ -48,16 +48,32 @@ export const handleGamblerSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Gambler ULT: Coinflip armed (+5000 / -1000)
+ * Gambler ULT: Coinflip immediately (+5000 / -1000)
  */
 export const handleGamblerUlt = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.gamblerUlt = true;
+  // Perform coinflip immediately
+  const head = Math.random() < 0.5;
+  const delta = head ? 5000 : -1000;
+
+  // Apply score immediately to the singer
+  const currentScore = singer.score ?? 0;
+  singer.score = currentScore + delta;
+
+  const scoreChanges = [{
+    scope: 'PLAYER' as const,
+    target: singer.name,
+    from: currentScore,
+    to: currentScore + delta,
+    delta,
+    reason: `GAMBLER ULT (coinflip ${head ? 'HEAD +5000' : 'TAIL -1000'})`,
+  }];
 
   return {
     success: true,
     members: ctx.members,
-    logs: [`ULT GAMBLER: coinflip armed (+5000 / -1000)`],
+    scoreChanges,
+    logs: [`ULT GAMBLER: coinflip ${head ? 'HEAD +5000' : 'TAIL -1000'}`],
   };
 };

@@ -1379,6 +1379,9 @@ export const GamePlayTeamScreen = () => {
 
         const lastTurnDelta = singerTurnDelta;
 
+        // Store lastTurnDelta on singer for MIMIC skill echo
+        singer.lastTurnDelta = lastTurnDelta;
+
         // Decrement sealed/neg buffs if active on this team's turn
         if (sealedTeamThisTurn) teamBuffsTx[t].sealedTurns = Math.max(0, (teamBuffsTx[t].sealedTurns ?? 0) - 1);
         if (negZeroActive) teamBuffsTx[t].negZeroTurns = Math.max(0, (teamBuffsTx[t].negZeroTurns ?? 0) - 1);
