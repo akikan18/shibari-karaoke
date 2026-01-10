@@ -1313,8 +1313,8 @@ export const GamePlayTeamScreen = () => {
   // =========================
   const canControlTurn = isHost || currentSinger?.id === userId;
 
-  const canOperateAbility =
-    currentSinger?.id === userId || (isHost && (isGuestTurn || (currentSinger && offlineUsers.has(currentSinger.id))));
+  const canOperateAbility = isHost || currentSinger?.id === userId;
+
 
   // team-sealed (legacy/team seal)
   const sealedTeamThisTurnClient = useMemo(() => {
@@ -1453,9 +1453,7 @@ export const GamePlayTeamScreen = () => {
   const pickCandidateTx = async (targetMemberId: string, cand: ThemeCard, isProxy: boolean) => {
     if (!roomId || !targetMemberId) return;
 
-    const canPick =
-      targetMemberId === userId ||
-      (isHost && (targetMemberId.startsWith?.('guest_') || offlineUsers.has(targetMemberId)));
+    const canPick = isHost || targetMemberId === userId;
 
     if (!canPick && !(isHost && isHostOverrideSelecting)) return;
 
@@ -1966,9 +1964,9 @@ export const GamePlayTeamScreen = () => {
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
 
-        const canOperate =
-          singer.id === userId || (isHost && (String(singer.id).startsWith('guest_') || offlineUsers.has(singer.id)));
+        const canOperate = isHost || singer.id === userId;
         if (!canOperate) return;
+
 
         // SEALED (team / personal): ability disabled
         if ((teamBuffsTx?.[t]?.sealedTurns ?? 0) > 0) return;
