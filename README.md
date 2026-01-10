@@ -1,73 +1,116 @@
-# React + TypeScript + Vite
+# しばりカラオケ (Shibari Karaoke)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+マルチプレイヤー対応のパーティーゲームアプリケーション。ランダムに出題される「お題」をクリアしてスコアを競います。
 
-Currently, two official plugins are available:
+## 概要
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+しばりカラオケは、リアルタイム通信機能を活用したWebベースのパーティーゲームです。複数のプレイヤーがルームに参加し、様々なゲームモードで楽しむことができます。
 
-## React Compiler
+## 主な機能
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### ゲームモード
 
-## Expanding the ESLint configuration
+- **STANDARD (スタンダード)**: 個人戦バトル。全員がライバルとしてお題をクリアし、スコアを競います
+- **TEAM BATTLE (チーム対抗戦)**: 2チームに分かれて対決。固有ロールとスキルを駆使して勝利を目指します
+- **FREE MODE (フリーモード)**: スコアや勝敗を気にせず、ランダムにお題を出して遊べるカジュアルモード
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### その他の機能
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- ルームベースのマルチプレイヤー対応
+- リアルタイム同期 (Firebase Realtime Database)
+- プレイヤープロフィール編集
+- ゲスト参加機能
+- スマートフォン・タブレット対応
+- Wake Lock対応 (画面スリープ防止)
+- アニメーション豊富なUI (Framer Motion)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## 技術スタック
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **フロントエンド**: React 18 + TypeScript
+- **ビルドツール**: Vite
+- **ルーティング**: React Router v6
+- **UI/スタイリング**: Tailwind CSS + DaisyUI
+- **アニメーション**: Framer Motion
+- **バックエンド/データベース**: Firebase (Firestore)
+- **デプロイ**: GitHub Pages
+
+## 開発環境のセットアップ
+
+### 必要要件
+
+- Node.js (v18以降推奨)
+- npm または yarn
+
+### インストール
+
+```bash
+# リポジトリをクローン
+git clone <repository-url>
+cd shibari-karaoke
+
+# 依存関係をインストール
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Firebase設定
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+1. Firebaseプロジェクトを作成
+2. プロジェクトルートに `.env` ファイルを作成
+3. Firebase設定情報を記載:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```env
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_auth_domain
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_storage_bucket
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
 ```
+
+### 開発サーバーの起動
+
+```bash
+npm run dev
+```
+
+アプリケーションは `http://localhost:5173` で起動します。
+
+## ビルドとデプロイ
+
+```bash
+# プロダクションビルド
+npm run build
+
+# ビルドしたファイルのプレビュー
+npm run preview
+
+# GitHub Pagesにデプロイ
+npm run deploy
+```
+
+## プロジェクト構成
+
+```
+src/
+├── components/     # 再利用可能なUIコンポーネント
+├── screens/        # 各画面のコンポーネント
+├── hooks/          # カスタムReact Hooks
+├── firebase.ts     # Firebase設定
+├── App.tsx         # メインアプリケーション
+└── main.tsx        # エントリーポイント
+```
+
+## 主要な画面
+
+- `EntranceScreen`: エントランス画面 (ルーム作成・参加)
+- `MenuScreen`: ゲームモード選択画面
+- `GameSetupScreen`: ロビー画面 (プレイヤー準備)
+- `GamePlayScreen`: ゲームプレイ画面 (スタンダードモード)
+- `GamePlayTeamScreen`: ゲームプレイ画面 (チームバトルモード)
+- `FreeModeScreen`: フリーモード画面
+- `ResultScreen`: 結果発表画面
+- `CustomThemeScreen`: お題カスタマイズ画面
+
+## ライセンス
+
+このプロジェクトはプライベートプロジェクトです。
