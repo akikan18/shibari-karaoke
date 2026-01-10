@@ -45,6 +45,14 @@ import {
   drawFromDeck,
   shuffle,
 } from '../game/team-battle/theme';
+import {
+  hasIronwallPassive,
+  mitigateNegative,
+  applySingerDelta,
+  applyTeamDelta,
+  decrementBuffTurns,
+  cleanupMemberDebuffs,
+} from '../game/team-battle/resultProcessor';
 
 // --- UI Components ---
 import { ActionOverlay } from '../components/team-battle/overlays/ActionOverlay';
