@@ -42,9 +42,7 @@ export const handleMimicSkill = (ctx: AbilityContext): AbilityResult => {
   const lastTurn = singer.lastTurnDelta ?? 0;
   const add = Math.round(lastTurn * 0.5);
 
-  // Apply score immediately to the singer
   const currentScore = singer.score ?? 0;
-  singer.score = currentScore + add;
 
   const scoreChanges = [{
     scope: 'PLAYER' as const,

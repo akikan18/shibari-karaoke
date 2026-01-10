@@ -57,9 +57,7 @@ export const handleGamblerUlt = (ctx: AbilityContext): AbilityResult => {
   const head = Math.random() < 0.5;
   const delta = head ? 5000 : -1000;
 
-  // Apply score immediately to the singer
   const currentScore = singer.score ?? 0;
-  singer.score = currentScore + delta;
 
   const scoreChanges = [{
     scope: 'PLAYER' as const,
