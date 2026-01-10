@@ -39,7 +39,7 @@ export const handleMaestroSkillBuff: ArmedBuffHandler = (ctx) => {
 /**
  * SHOWMAN SKILL: Armed buff handler
  */
-export const handleEncoreBuff: ArmedBuffHandler = (ctx) => {
+export const handleShowmanSkillBuff: ArmedBuffHandler = (ctx) => {
   const { effectiveSuccess, applySingerDelta } = ctx;
 
   if (effectiveSuccess) {
@@ -52,7 +52,7 @@ export const handleEncoreBuff: ArmedBuffHandler = (ctx) => {
 /**
  * GAMBLER SKILL: Armed buff handler
  */
-export const handleDoubleDownBuff: ArmedBuffHandler = (ctx) => {
+export const handleGamblerSkillBuff: ArmedBuffHandler = (ctx) => {
   const { singer, effectiveSuccess, applySingerDelta, singerTurnDelta } = ctx;
 
   if (effectiveSuccess) {
@@ -83,7 +83,7 @@ export const handleGamblerUltBuff: ArmedBuffHandler = (ctx) => {
 /**
  * SHOWMAN ULT: Armed buff handler
  */
-export const handleSpotlightBuff: ArmedBuffHandler = (ctx) => {
+export const handleShowmanUltBuff: ArmedBuffHandler = (ctx) => {
   const { effectiveSuccess, applyTeamDelta, enemyTeam } = ctx;
 
   if (effectiveSuccess) {
@@ -96,7 +96,7 @@ export const handleSpotlightBuff: ArmedBuffHandler = (ctx) => {
 /**
  * MIMIC SKILL: Armed buff handler
  */
-export const handleEchoBuff: ArmedBuffHandler = (ctx) => {
+export const handleMimicSkillBuff: ArmedBuffHandler = (ctx) => {
   const { applySingerDelta, lastTurnDelta } = ctx;
 
   const lastTurn = lastTurnDelta ?? 0;
@@ -109,16 +109,16 @@ export const handleEchoBuff: ArmedBuffHandler = (ctx) => {
 /**
  * HYPE SKILL: Armed buff handler
  */
-export const handleHypeBoostBuff: ArmedBuffHandler = (ctx) => {
+export const handleHypeSkillBuff: ArmedBuffHandler = (ctx) => {
   const { singer, effectiveSuccess, applySingerDelta } = ctx;
 
-  const turns = (singer.buffs.hypeBoost?.turns ?? 0) as number;
+  const turns = (singer.buffs.hypeSkill?.turns ?? 0) as number;
   if (effectiveSuccess) {
     applySingerDelta(500, 'HYPE SKILL (success +500)');
   }
 
   const next = Math.max(0, turns - 1);
-  singer.buffs.hypeBoost.turns = next;
+  singer.buffs.hypeSkill.turns = next;
 
   return { shouldConsume: next === 0, consumeValue: null };
 };
@@ -126,7 +126,7 @@ export const handleHypeBoostBuff: ArmedBuffHandler = (ctx) => {
 /**
  * COACH SKILL: Armed buff handler
  */
-export const handleSafeBuff: ArmedBuffHandler = (ctx) => {
+export const handleCoachSkillBuff: ArmedBuffHandler = (ctx) => {
   const { effectiveSuccess, applyTeamDelta, singer } = ctx;
 
   if (!effectiveSuccess) {
@@ -141,13 +141,13 @@ export const handleSafeBuff: ArmedBuffHandler = (ctx) => {
  */
 export const armedBuffHandlers: Record<string, ArmedBuffHandler> = {
   maestroSkill: handleMaestroSkillBuff,
-  encore: handleEncoreBuff,
-  doubleDown: handleDoubleDownBuff,
+  showmanSkill: handleShowmanSkillBuff,
+  gamblerSkill: handleGamblerSkillBuff,
   gamblerUlt: handleGamblerUltBuff,
-  spotlight: handleSpotlightBuff,
-  echo: handleEchoBuff,
-  hypeBoost: handleHypeBoostBuff,
-  safe: handleSafeBuff,
+  showmanUlt: handleShowmanUltBuff,
+  mimicSkill: handleMimicSkillBuff,
+  hypeSkill: handleHypeSkillBuff,
+  coachSkill: handleCoachSkillBuff,
 };
 
 /**
@@ -177,13 +177,13 @@ export const processArmedBuffs = (
   // Process each buff in order
   const buffsToProcess = [
     'maestroSkill',
-    'encore',
-    'doubleDown',
+    'showmanSkill',
+    'gamblerSkill',
     'gamblerUlt',
-    'spotlight',
-    'echo',
-    'hypeBoost',
-    'safe',
+    'showmanUlt',
+    'mimicSkill',
+    'hypeSkill',
+    'coachSkill',
   ];
 
   for (const buffName of buffsToProcess) {

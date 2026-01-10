@@ -22,7 +22,7 @@ export const handleShowmanPassive = (ctx: PassiveContext): PassiveResult => {
 export const handleShowmanSkill = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.encore = true;
+  singer.buffs.showmanSkill = true;
 
   return {
     success: true,
@@ -37,7 +37,7 @@ export const handleShowmanSkill = (ctx: AbilityContext): AbilityResult => {
 export const handleShowmanUlt = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.spotlight = true;
+  singer.buffs.showmanUlt = true;
 
   return {
     success: true,

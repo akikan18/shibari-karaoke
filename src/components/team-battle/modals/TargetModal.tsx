@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 export type TargetModalState = null | {
   title: string;
   mode: 'ally' | 'enemy';
-  action: 'coach_timeout' | 'coach_ult' | 'saboteur_sabotage' | 'oracle_reroll' | 'hype_boost';
+  action: 'coach_skill' | 'coach_ult' | 'saboteur_skill' | 'oracle_skill' | 'hype_skill';
 };
 
 type TargetModalProps = {
