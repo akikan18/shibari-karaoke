@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { planStartAuras, normalizeTeamBuffs } from '../game/team-battle/scoring';
+import { fmt, fmtChangeLine } from '../game/team-battle/utils';
+import { ScoreChange, TeamId } from '../game/team-battle/types';
 
 // --------------------
 // Role Definitions (Updated)
@@ -493,8 +496,68 @@ export const TeamDraftScreen = () => {
 
     setOrderEditBusy(true);
     try {
-      await updateDoc(doc(db, 'rooms', roomId), {
-        status: 'playing',
+      await runTransaction(db, async (transaction) => {
+        const roomRef = doc(db, 'rooms', roomId);
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+
+        const data = roomSnap.data();
+        const members = Array.isArray(data.members) ? data.members : [];
+
+        // Sort members by turn order to find first singer
+        const sorted = members.slice().sort((a: any, b: any) => (a.turnOrder ?? 9999) - (b.turnOrder ?? 9999));
+        const firstSinger = sorted[0];
+
+        if (!firstSinger) {
+          // No valid first singer, just update status
+          transaction.update(roomRef, { status: 'playing' });
+          return;
+        }
+
+        // Calculate turn-start effects for first turn using planStartAuras
+        const teamBuffs = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+        const currentTeamScores = data.teamScores || { A: 0, B: 0 };
+
+        const auraPlans = planStartAuras(members, firstSinger, currentTeamScores, teamBuffs);
+
+        // Build score changes and update team scores
+        const auraChanges: ScoreChange[] = [];
+        let teamScoresTx = { ...currentTeamScores };
+
+        for (const plan of auraPlans) {
+          const from = teamScoresTx[plan.team] ?? 0;
+          const to = from + plan.delta;
+          teamScoresTx = { ...teamScoresTx, [plan.team]: to };
+          auraChanges.push({
+            scope: 'TEAM',
+            target: `TEAM ${plan.team}`,
+            from,
+            to,
+            delta: plan.delta,
+            reason: `AURA: ${plan.reason}`,
+          });
+        }
+
+        const auraLines = auraChanges.map(fmtChangeLine);
+        const logs: string[] = [
+          `TURN START: ${firstSinger?.name || '???'} (TEAM ${firstSinger?.team || '?'})`,
+          ...auraLines.map((x) => ` - ${x}`),
+        ];
+
+        // Create overlay display
+        const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
+          const from = currentTeamScores[team] ?? 0;
+          const to = teamScoresTx[team] ?? 0;
+          const delta = to - from;
+          return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
+        });
+
+        transaction.update(roomRef, {
+          status: 'playing',
+          teamScores: teamScoresTx,
+          logs: [...(data.logs || []), ...logs],
+          lastLog: { timestamp: Date.now(), title: 'TURN START', detail: overlayTeamLines.join('\n') },
+        });
       });
     } finally {
       setOrderEditBusy(false);

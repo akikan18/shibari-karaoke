@@ -3,963 +3,72 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
 // --- Firebase ---
-import { doc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { roomTransaction } from '../firebase/transactionHelper';
 
 // --- Components & Hooks ---
 import { Toast, useToast } from '../components/Toast';
 import { usePresence } from '../hooks/usePresence';
 import { useWakeLock } from '../hooks/useWakeLock';
 
-// =========================
-// Config
-// =========================
-const BASE_SUCCESS = 1000;
-const BASE_FAIL = 0;
+// --- Game Logic & Types ---
+import { ALL_ROLES, RoleId, TeamId, getRoleById, getDefaultRoleUses } from '../game/team-battle/roles';
+import { LogKind, LogEntry, ScoreScope, ScoreChange } from '../game/team-battle/types';
+import { normalizeMember, normalizeMembers, Member } from '../game/team-battle/memberUtils';
+import {
+  BASE_SUCCESS,
+  BASE_FAIL,
+  clamp,
+  capLogs,
+  capEntries,
+  fmt,
+  fmtChangeLine,
+  iconOf,
+  kindColorClass,
+  formatTime,
+} from '../game/team-battle/utils';
+import {
+  sortByTurn,
+  computeTeamScores,
+  isReadyForTurn,
+  findNextReadyIndex,
+  findFirstReadyIndex,
+  normalizeTeamBuffs,
+  planStartAuras,
+} from '../game/team-battle/scoring';
+import {
+  ThemeCard,
+  cardTitle,
+  cardCriteria,
+  normalizeThemePool,
+  drawFromDeck,
+  shuffle,
+} from '../game/team-battle/theme';
+import {
+  hasIronwallPassive,
+  mitigateNegative as mitigateNegativeHelper,
+  applySingerDelta,
+  applyTeamDelta,
+  decrementBuffTurns,
+  cleanupMemberDebuffs,
+} from '../game/team-battle/resultProcessor';
+import { getAbilityHandler, getPassiveHandler } from '../game/team-battle/abilities';
+import { processArmedBuffs } from '../game/team-battle/armedBuffHandlers';
+import { initializeTeamScores, normalizeCurrentIndex } from '../game/team-battle/transactionUtils';
+
+// --- UI Components ---
+import { ActionOverlay } from '../components/team-battle/overlays/ActionOverlay';
+import { AbilityFxOverlay, AbilityFx } from '../components/team-battle/overlays/AbilityFxOverlay';
+import { ConfirmModal, ConfirmState } from '../components/team-battle/modals/ConfirmModal';
+import { JoinTeamRoleModal } from '../components/team-battle/modals/JoinTeamRoleModal';
+import { TargetModal, TargetModalState } from '../components/team-battle/modals/TargetModal';
+import { GuideModal } from '../components/team-battle/modals/GuideModal';
+import { OracleUltPickModal, OracleUltPickState, OracleUltPickItem } from '../components/team-battle/modals/OracleUltPickModal';
+import { MissionDisplay } from '../components/team-battle/MissionDisplay';
+import { ThemeSelectionGrid } from '../components/team-battle/ThemeSelectionGrid';
 
-const MAX_LOGS = 80;
-const MAX_LOG_ENTRIES = 220;
 
-const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
-const capLogs = (logs: string[]) => logs.slice(Math.max(0, logs.length - MAX_LOGS));
-const capEntries = (entries: LogEntry[]) => entries.slice(Math.max(0, entries.length - MAX_LOG_ENTRIES));
-const fmt = (n: number) => (n >= 0 ? `+${n.toLocaleString()}` : `${n.toLocaleString()}`);
-
-// =========================
-// Theme Card
-// =========================
-type ThemeCard = string | { title: string; criteria?: string };
-
-const cardTitle = (c: ThemeCard | null | undefined) => {
-  if (!c) return '...';
-  return typeof c === 'string' ? c : c.title || '...';
-};
-
-const cardCriteria = (c: ThemeCard | null | undefined) => {
-  if (!c) return '...';
-  return typeof c === 'string' ? '—' : c.criteria || '—';
-};
-
-const DEFAULT_THEME_POOL: ThemeCard[] = [
-  { title: 'FREE THEME', criteria: '好きな曲でOK' },
-  { title: 'J-POP', criteria: 'J-POP を歌う' },
-  { title: 'アニソン', criteria: 'アニメ関連曲を歌う' },
-  { title: 'バラード', criteria: 'バラード系を歌う' },
-  { title: 'ロック', criteria: 'ロック系を歌う' },
-  { title: '盛り上げ', criteria: '場を盛り上げる曲' },
-  { title: '昭和', criteria: '昭和の曲' },
-  { title: '平成', criteria: '平成の曲' },
-  { title: '令和', criteria: '令和の曲' },
-  { title: '英語曲', criteria: '英語の曲' },
-];
-
-const shuffle = <T,>(arr: T[]) => {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
-const normalizeThemePool = (poolLike: any): ThemeCard[] => {
-  const pool = Array.isArray(poolLike) ? poolLike : [];
-  const normalized: ThemeCard[] = pool
-    .map((x: any) => {
-      if (!x) return null;
-      if (typeof x === 'string') return { title: x, criteria: '—' } as ThemeCard;
-      if (typeof x === 'object') {
-        const title = x.title ?? x.name ?? '';
-        const criteria = x.criteria ?? x.condition ?? x.clear ?? '—';
-        if (!title) return null;
-        return { title, criteria } as ThemeCard;
-      }
-      return null;
-    })
-    .filter(Boolean) as ThemeCard[];
-
-  return normalized.length > 0 ? normalized : DEFAULT_THEME_POOL;
-};
-
-const drawFromDeck = <T,>(deckLike: any, pool: T[], n: number) => {
-  let d: T[] = Array.isArray(deckLike) ? (deckLike as T[]).slice() : [];
-  const p = pool.slice();
-
-  const reshuffle = () => shuffle(p);
-
-  if (!d || d.length === 0) d = reshuffle();
-
-  const picks: T[] = [];
-  for (let i = 0; i < n; i++) {
-    if (d.length === 0) d = reshuffle();
-    const item = d.pop();
-    if (item !== undefined) picks.push(item);
-  }
-
-  if (n === 1) return { nextDeck: d, picked: picks[0] ?? null, choices: null as T[] | null };
-  return { nextDeck: d, picked: null as T | null, choices: picks };
-};
-
-// =========================
-// Roles
-// =========================
-type TeamId = 'A' | 'B';
-
-type RoleId =
-  | 'maestro'
-  | 'showman'
-  | 'ironwall'
-  | 'coach'
-  | 'oracle'
-  | 'mimic'
-  | 'hype'
-  | 'saboteur'
-  | 'underdog'
-  | 'gambler';
-
-type RoleDef = {
-  id: RoleId;
-  name: string;
-  type: 'ATK' | 'DEF' | 'SUP' | 'TEC';
-  sigil: string;
-  passive: string;
-  skill: string;
-  ult: string;
-};
-
-const ROLE_DEFS: RoleDef[] = [
-  {
-    id: 'maestro',
-    name: 'THE MAESTRO',
-    type: 'ATK',
-    sigil: '⬢',
-    passive: '成功でCOMBO+1(最大5)。成功ボーナス+250×COMBO。失敗でCOMBO消滅のみ（減点なし）。',
-    skill: 'SKILL：(3回) このターン「成功なら追加でCOMBO+2 / 失敗なら-500」',
-    ult: 'ULT：(1回) COMBO×800をチーム付与しCOMBO消費。味方次成功+500(1回)',
-  },
-  {
-    id: 'showman',
-    name: 'SHOWMAN',
-    type: 'ATK',
-    sigil: '◆',
-    passive: 'PASSIVE：成功時、常時 +500。',
-    skill: 'SKILL：(3回) 成功時さらに+500（このターンのみ）',
-    ult: 'ULT：(1回) 成功なら敵チーム-2000（このターンのみ）',
-  },
-  {
-    id: 'ironwall',
-    name: 'IRON WALL',
-    type: 'DEF',
-    sigil: '▣',
-    passive: 'チームが受ける「マイナス」を30%軽減（歌唱の失敗0は対象外）。',
-    skill: 'SKILL：(3回) 次の自チームのターン、受けるマイナス-50%',
-    ult: 'ULT：(1回) 次の自チームのターン、受けるマイナスをすべて0',
-  },
-  {
-    id: 'coach',
-    name: 'THE COACH',
-    type: 'SUP',
-    sigil: '✚',
-    passive: '味方ターン開始時、チーム+150（歌唱結果に依存しない）。',
-    skill: 'SKILL：(3回) TIMEOUT：指定味方にSAFE付与。次の失敗でもチーム+300。',
-    ult: 'ULT：(1回) 指定した味方は次のターン成功になる',
-  },
-  {
-    id: 'oracle',
-    name: 'ORACLE',
-    type: 'TEC',
-    sigil: '⟁',
-    passive: '自分のターンはお題3択。',
-    skill: 'SKILL：(3回) 自分or味方のお題を引き直し（3択で1番目は現在のお題）',
-    ult: 'ULT：(1回) 次の相手チーム全員のお題を「ORACLE側が」3択から選んで確定（相手は選べない）',
-  },
-  {
-    id: 'mimic',
-    name: 'MIMIC',
-    type: 'TEC',
-    sigil: '◈',
-    passive: '直前の味方成功の獲得点30%を、自分成功時に上乗せ。',
-    skill: 'SKILL：(3回) ECHO：直前のスコア変動を50%コピー（成功/失敗問わず）。',
-    // ✅ FIX: ユーザー仕様に合わせて更新
-    ult: 'ULT：(1回) 発動後、味方全員の「次の自分のターン」に MIMIC パッシブを付与（そのターンのみ）。',
-  },
-  {
-    id: 'hype',
-    name: 'HYPE ENGINE',
-    type: 'SUP',
-    sigil: '✦',
-    passive: '自分のターン開始時、チーム+400（結果に依存しない）。',
-    skill: 'SKILL：(3回) 選んだ味方の「次の2ターン成功時 +500」(1回)',
-    ult: 'ULT：(1回) 以降3ターン味方全員の成功スコア +500',
-  },
-  {
-    id: 'saboteur',
-    name: 'SABOTEUR',
-    type: 'TEC',
-    sigil: '☒',
-    passive: '自分成功で敵チーム-300。',
-    skill: 'SKILL：(3回) 敵1人指定：その敵が成功時 +0 / 失敗時 -1000（1回）',
-    ult: 'ULT：(1回) 次の敵チーム全員の「次の自分の番」1回分、特殊効果をリセットしパッシブ/スキル/ULTを無効化（味方は対象外）',
-  },
-  {
-    id: 'underdog',
-    name: 'UNDERDOG',
-    type: 'DEF',
-    sigil: '⬟',
-    passive: '負けている時、自分のターン開始時に +500。',
-    skill: 'SKILL：(3回) 現在の点差の20%を相手から奪う（最大2000）。',
-    ult: 'ULT：(1回) 負けているとき：相手-2000まで追いつく／勝っているとき：チーム+2000',
-  },
-  {
-    id: 'gambler',
-    name: 'GAMBLER',
-    type: 'TEC',
-    sigil: '🎲',
-    // ✅ FIX: ユーザー仕様に合わせて更新
-    passive: 'PASSIVE：成功時に0〜1000のランダムで追加ボーナス。失敗時に0〜-1000からランダムで減点（100刻み）。',
-    skill: 'SKILL：(3回) 成功×2 / 失敗-2000。スキル使用時パッシブがマイナスなった場合でも0にとどまる。',
-    ult: 'ULT：(1回) 表なら +5000 ／ 裏なら -1000。',
-  },
-];
-
-const roleDef = (id?: RoleId) => ROLE_DEFS.find((r) => r.id === id);
-
-const defaultRoleUses = (_rid?: RoleId) => {
-  const skillUses = 3;
-  const ultUses = 1;
-  return { skillUses, ultUses };
-};
-
-// =========================
-// Logs (structured)
-// =========================
-type LogKind = 'SYSTEM' | 'TURN' | 'RESULT' | 'SKILL' | 'ULT';
-type LogEntry = {
-  ts: number;
-  kind: LogKind;
-  actorName?: string;
-  actorId?: string;
-  team?: TeamId;
-  title: string;
-  lines: string[];
-};
-
-type ScoreScope = 'PLAYER' | 'TEAM';
-type ScoreChange = {
-  scope: ScoreScope;
-  target: string;
-  from: number;
-  to: number;
-  delta: number;
-  reason: string;
-};
-
-const fmtChangeLine = (c: ScoreChange) => {
-  const arrow = '→';
-  return `${c.scope} ${c.target}: ${c.from.toLocaleString()} ${arrow} ${c.to.toLocaleString()} (${fmt(c.delta)}) [${c.reason}]`;
-};
-
-const iconOf = (k: LogKind) => {
-  if (k === 'RESULT') return '🎤';
-  if (k === 'SKILL') return '✨';
-  if (k === 'ULT') return '💥';
-  if (k === 'TURN') return '⏭️';
-  return '🧾';
-};
-
-const kindColorClass = (k: LogKind) => {
-  if (k === 'RESULT') return 'border-cyan-500/30 bg-cyan-500/10';
-  if (k === 'SKILL') return 'border-blue-500/30 bg-blue-500/10';
-  if (k === 'ULT') return 'border-yellow-500/30 bg-yellow-500/10';
-  if (k === 'TURN') return 'border-white/10 bg-white/5';
-  return 'border-white/10 bg-black/30';
-};
-
-const formatTime = (ts: number) => {
-  try {
-    const d = new Date(ts);
-    const hh = `${d.getHours()}`.padStart(2, '0');
-    const mm = `${d.getMinutes()}`.padStart(2, '0');
-    const ss = `${d.getSeconds()}`.padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
-  } catch {
-    return '';
-  }
-};
-
-// =========================
-// Turn Order Helpers
-// =========================
-const sortByTurn = (a: any, b: any) => (a.turnOrder ?? 9999) - (b.turnOrder ?? 9999);
-
-const computeTeamScores = (mems: any[]) => {
-  const A = mems.filter((m) => m.team === 'A').reduce((s, m) => s + (m.score ?? 0), 0);
-  const B = mems.filter((m) => m.team === 'B').reduce((s, m) => s + (m.score ?? 0), 0);
-  return { A, B };
-};
-
-const isReadyForTurn = (m: any) => (m?.team === 'A' || m?.team === 'B') && !!m?.role?.id;
-
-const findNextReadyIndex = (mems: any[], fromIndex: number) => {
-  const n = mems.length;
-  if (n === 0) return 0;
-  for (let offset = 1; offset <= n; offset++) {
-    const i = (fromIndex + offset) % n;
-    if (isReadyForTurn(mems[i])) return i;
-  }
-  return fromIndex;
-};
-
-const findFirstReadyIndex = (mems: any[]) => {
-  const n = mems.length;
-  for (let i = 0; i < n; i++) if (isReadyForTurn(mems[i])) return i;
-  return 0;
-};
-
-// =========================
-// TeamBuff normalize
-// =========================
-const normalizeTeamBuffs = (tbLike: any) => {
-  const A = tbLike?.A && typeof tbLike.A === 'object' ? tbLike.A : {};
-  const B = tbLike?.B && typeof tbLike.B === 'object' ? tbLike.B : {};
-  return { A: { ...A }, B: { ...B } };
-};
-
-// =========================
-// Turn Start Auras
-// =========================
-type AuraPlan = { team: TeamId; delta: number; reason: string };
-
-const planStartAuras = (mems: any[], nextSinger: any, teamScores: { A: number; B: number }, teamBuffs: any) => {
-  const plans: AuraPlan[] = [];
-  if (!nextSinger?.team) return plans;
-
-  const t: TeamId = nextSinger.team;
-  const et: TeamId = t === 'A' ? 'B' : 'A';
-
-  // チーム封印中(SEALED)はチームパッシブ系も無効化
-  const sealedTeam = (teamBuffs?.[t]?.sealedTurns ?? 0) > 0;
-  const sealedPersonal = !!nextSinger?.debuffs?.sealedOnce;
-  if (sealedTeam || sealedPersonal) return plans;
-
-  // coach passive
-  if (mems.some((m) => m.team === t && m.role?.id === 'coach')) plans.push({ team: t, delta: 150, reason: 'COACH PASSIVE (+150 at ally turn start)' });
-  // hype passive
-  if (nextSinger?.role?.id === 'hype') plans.push({ team: t, delta: 400, reason: 'HYPE PASSIVE (+400 at self turn start)' });
-  // underdog passive
-  if (nextSinger?.role?.id === 'underdog') {
-    if ((teamScores[t] ?? 0) < (teamScores[et] ?? 0)) plans.push({ team: t, delta: 500, reason: 'UNDERDOG PASSIVE (+500 when losing at self turn start)' });
-  }
-
-  return plans;
-};
-
-// =========================
-// Overlay: Turn Result (auto close)
-// =========================
-const ActionOverlay = ({ actionLog, onClose }: { actionLog: any; onClose: () => void }) => {
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onCloseRef.current?.();
-    }, 2200);
-    return () => clearTimeout(timer);
-  }, [actionLog]);
-
-  if (!actionLog) return null;
-
-  const details = actionLog.detail ? String(actionLog.detail).split('\n') : [];
-  const limited = details.slice(0, 4);
-  const omitted = details.length - limited.length;
-
-  const isSuccess = String(actionLog.title || '').toUpperCase().includes('SUCCESS');
-  const headlineColor = isSuccess ? '#22c55e' : '#ef4444';
-
-  return (
-    <div className="fixed inset-0 z-[150] pointer-events-none flex items-center justify-center overflow-hidden">
-      <motion.div
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '-100%' }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="w-full bg-gradient-to-r from-black/80 via-black/95 to-black/80 border-y-2 border-white/20 py-6 md:py-9 flex flex-col items-center justify-center relative backdrop-blur-sm"
-      >
-        <div className="absolute inset-0 opacity-50" style={{ background: `radial-gradient(circle at 50% 50%, ${headlineColor}22, transparent 60%)` }} />
-
-        <div className="text-[10px] md:text-xs font-mono tracking-[0.4em] text-white/60">TURN RESULT</div>
-        <h2 className="text-2xl md:text-5xl font-black italic tracking-widest px-4 text-center mb-3" style={{ color: headlineColor, textShadow: `0 0 18px ${headlineColor}66` }}>
-          {actionLog.title}
-        </h2>
-
-        <div className="flex flex-col gap-2 items-center w-full px-4">
-          {limited.map((line: string, idx: number) => {
-            const isNegative = line.includes('(-') || line.includes(' -') || line.includes('(-');
-            const isTeam = line.startsWith('TEAM ');
-            const colorClasses = isTeam
-              ? isNegative
-                ? 'text-red-300 border-red-500/30 bg-red-900/20'
-                : 'text-cyan-200 border-cyan-500/30 bg-cyan-900/20'
-              : 'text-white border-white/10 bg-black/30';
-
-            return (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05 + idx * 0.05 }}
-                className={`text-sm md:text-2xl font-bold px-5 py-2 rounded-full border ${colorClasses}`}
-              >
-                {line}
-              </motion.div>
-            );
-          })}
-          {omitted > 0 && <div className="text-[10px] md:text-xs font-mono tracking-widest text-white/40">+{omitted} more (see LOG)</div>}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Overlay: SKILL/ULT (auto close)
-// =========================
-type AbilityFx = null | {
-  timestamp: number;
-  kind: 'SKILL' | 'ULT';
-  actorName: string;
-  roleName: string;
-  team?: TeamId;
-  title?: string;
-  subtitle?: string;
-};
-
-const AbilityFxOverlay = ({ fx, onDone }: { fx: AbilityFx; onDone: () => void }) => {
-  const onDoneRef = useRef(onDone);
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-
-  const ts = fx?.timestamp ?? 0;
-
-  useEffect(() => {
-    if (!fx || !ts) return;
-    const timer = setTimeout(() => {
-      onDoneRef.current?.();
-    }, 1400);
-    return () => clearTimeout(timer);
-  }, [ts]);
-
-  if (!fx) return null;
-
-  const isUlt = fx.kind === 'ULT';
-  const color = isUlt ? '#f59e0b' : '#06b6d4';
-  const shadow = isUlt ? 'rgba(245,158,11,0.55)' : 'rgba(6,182,212,0.55)';
-
-  return (
-    <div className="fixed inset-0 z-[170] pointer-events-none flex items-center justify-center">
-      <motion.div key={`fx-bg-${fx.timestamp}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85" />
-      <motion.div
-        key={`fx-burst-${fx.timestamp}`}
-        initial={{ scale: 0.7, opacity: 0, filter: 'blur(10px)' }}
-        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, scale: 1.05, filter: 'blur(8px)' }}
-        transition={{ duration: 0.35, ease: 'easeOut' }}
-        className="relative w-full max-w-5xl px-4"
-      >
-        <motion.div
-          initial={{ scale: 0.6, opacity: 0 }}
-          animate={{ scale: [0.6, 1.25], opacity: [0, 0.35, 0] }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
-          className="absolute inset-0 rounded-[999px]"
-          style={{ border: `2px solid ${color}66`, boxShadow: `0 0 70px ${shadow}` }}
-        />
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 1, 0] }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
-          className="absolute -inset-6"
-          style={{
-            background:
-              `radial-gradient(circle at 20% 30%, ${color}55 0%, transparent 40%),` +
-              `radial-gradient(circle at 80% 40%, ${color}33 0%, transparent 45%),` +
-              `radial-gradient(circle at 50% 75%, ${color}44 0%, transparent 50%)`,
-            filter: 'blur(18px)',
-          }}
-        />
-        <div className="relative mx-auto rounded-2xl border border-white/15 bg-black/40 backdrop-blur-md py-10 md:py-14 px-6 md:px-10 text-center overflow-hidden">
-          <div className="absolute inset-0 opacity-30" style={{ background: `linear-gradient(135deg, ${color}33, transparent)` }} />
-          <div className="relative z-10">
-            <div className="text-[10px] md:text-xs font-mono tracking-[0.3em] text-white/70">
-              {fx.team ? `TEAM ${fx.team} ・ ` : ''}
-              {fx.kind} ACTIVATED
-            </div>
-            <div className="mt-2 text-[clamp(2rem,6vw,5rem)] font-black italic tracking-tight" style={{ color, textShadow: `0 0 28px ${shadow}` }}>
-              {fx.kind}
-            </div>
-            <div className="mt-2 text-white/90 font-black tracking-widest text-base md:text-2xl">{fx.actorName}</div>
-            <div className="mt-1 text-white/60 font-mono text-xs md:text-sm tracking-widest">{fx.roleName}</div>
-            {(fx.title || fx.subtitle) && (
-              <div className="mt-3 text-[11px] md:text-sm text-white/70 font-mono tracking-widest">
-                {fx.title && <div>{fx.title}</div>}
-                {fx.subtitle && <div className="opacity-80">{fx.subtitle}</div>}
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Generic Confirm Modal
-// =========================
-type ConfirmState =
-  | null
-  | {
-      title: string;
-      body: React.ReactNode;
-      confirmText?: string;
-      cancelText?: string;
-      danger?: boolean;
-      onConfirm: () => Promise<void> | void;
-    };
-
-const ConfirmModal = ({ state, busy, onClose }: { state: ConfirmState; busy: boolean; onClose: () => void }) => {
-  if (!state) return null;
-
-  return (
-    <div className="fixed inset-0 z-[260] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative w-full max-w-lg rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-6 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="text-xl font-black tracking-widest text-white">{state.title}</div>
-          <div className="mt-3 text-sm text-white/70 leading-relaxed">{state.body}</div>
-
-          <div className="mt-6 flex gap-3">
-            <button
-              disabled={busy}
-              onClick={onClose}
-              className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 font-bold tracking-widest text-xs"
-            >
-              {state.cancelText || 'CANCEL'}
-            </button>
-            <button
-              disabled={busy}
-              onClick={async () => {
-                await state.onConfirm();
-              }}
-              className={`flex-1 py-3 rounded-xl font-black tracking-widest text-xs transition-all ${
-                state.danger
-                  ? 'bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500'
-                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500'
-              }`}
-            >
-              {busy ? 'PROCESSING...' : state.confirmText || 'CONFIRM'}
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Join Wizard (mid-join team/role)
-// =========================
-const JoinTeamRoleModal = ({
-  isOpen,
-  step,
-  busy,
-  teamCounts,
-  usedRoleIds,
-  onPickTeam,
-  onPickRole,
-  onBack,
-}: {
-  isOpen: boolean;
-  step: 'team' | 'role';
-  busy: boolean;
-  teamCounts: { A: number; B: number };
-  usedRoleIds: Set<RoleId>;
-  onPickTeam: (t: TeamId) => void;
-  onPickRole: (r: RoleId) => void;
-  onBack: () => void;
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
-      <motion.div initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="relative w-full max-w-3xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden">
-        <div className="rounded-xl p-6 md:p-8 bg-gradient-to-b from-white/5 to-black/40">
-          {step === 'team' ? (
-            <>
-              <h2 className="text-xl md:text-2xl font-black tracking-widest text-cyan-300 italic">SELECT TEAM</h2>
-              <p className="text-xs text-white/50 font-mono mt-2">途中参加のため、まずチームを選んでください</p>
-
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button disabled={busy} onClick={() => onPickTeam('A')} className="p-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all text-left">
-                  <div className="text-sm font-black tracking-widest">TEAM A</div>
-                  <div className="text-[10px] font-mono text-white/50 mt-1">PLAYERS: {teamCounts.A}</div>
-                </button>
-
-                <button disabled={busy} onClick={() => onPickTeam('B')} className="p-5 rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all text-left">
-                  <div className="text-sm font-black tracking-widest">TEAM B</div>
-                  <div className="text-[10px] font-mono text-white/50 mt-1">PLAYERS: {teamCounts.B}</div>
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-black tracking-widest text-yellow-300 italic">SELECT ROLE</h2>
-                  <p className="text-xs text-white/50 font-mono mt-2">既存プレイヤーが使用中のロールは選択できません</p>
-                </div>
-                <button disabled={busy} onClick={onBack} className="px-3 py-2 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 text-xs">
-                  BACK
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
-                {ROLE_DEFS.map((r) => {
-                  const used = usedRoleIds.has(r.id);
-                  return (
-                    <button
-                      key={r.id}
-                      disabled={busy || used}
-                      onClick={() => onPickRole(r.id)}
-                      className={`p-4 rounded-xl border transition-all text-left ${
-                        used ? 'border-white/5 bg-black/20 opacity-50 cursor-not-allowed' : 'border-white/10 bg-black/30 hover:bg-white/10'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{r.sigil}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <div className="font-black truncate">{r.name}</div>
-                            {used && <span className="text-[9px] font-black px-2 py-0.5 rounded bg-red-900/50 border border-red-500/30 text-red-300">USED</span>}
-                          </div>
-                          <div className="text-[10px] font-mono tracking-widest text-white/40">TYPE: {r.type}</div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {busy && <div className="mt-4 text-[10px] text-cyan-300 font-mono tracking-widest animate-pulse">PROCESSING...</div>}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Target Modal (ability target choose)
-// =========================
-type TargetModalState = null | {
-  title: string;
-  mode: 'ally' | 'enemy';
-  action: 'coach_timeout' | 'coach_ult' | 'saboteur_sabotage' | 'oracle_reroll' | 'hype_boost';
-};
-
-const TargetModal = ({
-  isOpen,
-  title,
-  busy,
-  targets,
-  onClose,
-  onPick,
-}: {
-  isOpen: boolean;
-  title: string;
-  busy: boolean;
-  targets: any[];
-  onClose: () => void;
-  onPick: (id: string) => void;
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="relative w-full max-w-lg rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden">
-        <div className="rounded-xl p-5 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-lg font-black tracking-wider">{title}</div>
-            <button className="px-3 py-1 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 text-xs" onClick={onClose} disabled={busy}>
-              CLOSE
-            </button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {targets.map((m: any) => (
-              <button key={m.id} disabled={busy} onClick={() => onPick(m.id)} className="p-3 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 text-left transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">{m.avatar}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold truncate">{m.name}</div>
-                    <div className="text-[10px] font-mono tracking-widest text-white/40 truncate">
-                      TEAM {m.team} ・ ROLE {m.role?.name || '—'}
-                    </div>
-                  </div>
-                </div>
-              </button>
-            ))}
-            {targets.length === 0 && <div className="text-[12px] text-white/50 font-mono tracking-widest">NO VALID TARGET</div>}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Guide Modal
-// =========================
-const GuideModal = ({
-  open,
-  onClose,
-  members,
-  usedRoleIds,
-}: {
-  open: boolean;
-  onClose: () => void;
-  members: any[];
-  usedRoleIds: Set<RoleId>;
-}) => {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[255] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 20, scale: 0.96 }}
-        className="relative w-full max-w-4xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-5 md:p-6 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xl md:text-2xl font-black tracking-widest text-cyan-200">GUIDE</div>
-              <div className="text-[11px] font-mono tracking-widest text-white/50 mt-1">参加メンバーのロール説明（途中参加・ゲスト・オフライン含む）</div>
-            </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center">
-              ✕
-            </button>
-          </div>
-
-          <div className="mt-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 space-y-3">
-            {members.map((m) => {
-              const rid: RoleId | undefined = m.role?.id;
-              const def = rid ? roleDef(rid) : null;
-              const isGuest = String(m.id).startsWith('guest_');
-              const team = m.team || '?';
-              const roleName = m.role?.name || (rid ? def?.name : 'NO ROLE');
-              const usedBadge = rid && usedRoleIds.has(rid) ? 'USED' : null;
-
-              return (
-                <div key={m.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center text-xl">
-                      {m.avatar || '🎤'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="font-black truncate">{m.name || 'PLAYER'}</div>
-                        {isGuest && <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded font-black">GUEST</span>}
-                        {m.team === 'A' && <span className="text-[9px] bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 px-2 py-0.5 rounded font-black">TEAM A</span>}
-                        {m.team === 'B' && <span className="text-[9px] bg-red-500/20 text-red-200 border border-red-500/30 px-2 py-0.5 rounded font-black">TEAM B</span>}
-                      </div>
-                      <div className="text-[10px] font-mono tracking-widest text-white/50 truncate">
-                        ROLE: <span className="text-white/80">{roleName}</span>
-                        {usedBadge && <span className="ml-2 text-[9px] px-2 py-0.5 rounded bg-white/5 border border-white/10">IN USE</span>}
-                      </div>
-                    </div>
-                    <div className="flex-none text-[10px] font-mono tracking-widest text-white/40">{team !== '?' ? `TEAM ${team}` : 'TEAM ?'}</div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">PASSIVE</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.passive || '未選択 / ロール未決定'}</div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">SKILL</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.skill || '—'}</div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                      <div className="text-[9px] font-mono tracking-widest text-white/40 mb-1">ULT</div>
-                      <div className="text-[12px] text-white/75 leading-relaxed">{def?.ult || '—'}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {members.length === 0 && <div className="text-[11px] text-white/40 font-mono tracking-widest">NO MEMBERS</div>}
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Mission Display
-// =========================
-const MissionDisplay = React.memo(({ title, criteria, stateText }: any) => {
-  const displayTitle = stateText || title;
-
-  const getTitleStyle = (text: string) => {
-    const len = (text || '').length;
-    if (len > 50) return 'text-[clamp(0.9rem,3.5vw,1.5rem)]';
-    if (len > 30) return 'text-[clamp(1.1rem,4.5vw,2rem)]';
-    if (len > 15) return 'text-[clamp(1.4rem,6vw,3rem)]';
-    return 'text-[clamp(2rem,8vw,5rem)]';
-  };
-
-  return (
-    <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.05, opacity: 0 }} transition={{ type: 'spring', duration: 0.5 }} className="relative z-10 w-full max-w-6xl flex flex-col items-center gap-2 md:gap-4 text-center px-2">
-      <div className="w-full flex flex-col items-center mt-1 md:mt-2 px-2 overflow-visible">
-        <div className="inline-block px-3 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono tracking-[0.2em] text-[8px] md:text-xs mb-1 md:mb-2 font-bold">
-          CURRENT THEME
-        </div>
-
-        <div className="w-full px-1">
-          <h1 className={`font-black text-white drop-shadow-[0_0_20px_rgba(0,255,255,0.35)] leading-tight w-full whitespace-pre-wrap break-words text-center [text-wrap:balance] ${getTitleStyle(displayTitle)}`}>
-            {displayTitle}
-          </h1>
-        </div>
-      </div>
-
-      <div className="w-full flex justify-center mt-2 md:mt-4">
-        <div className="w-auto max-w-full bg-gradient-to-br from-red-900/40 to-black/40 border border-red-500/50 px-4 py-2 md:px-10 md:py-6 rounded-xl backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)] flex flex-col items-center gap-0.5">
-          <p className="text-red-300 font-mono tracking-[0.2em] text-[8px] md:text-xs uppercase opacity-90 font-bold whitespace-nowrap">Clear Condition</p>
-          <p className="font-black text-white tracking-widest text-[clamp(1.2rem,4vw,3rem)] md:text-[3rem] whitespace-pre-wrap break-words">{criteria}</p>
-        </div>
-      </div>
-    </motion.div>
-  );
-});
-
-// =========================
-// ORACLE ULT pick (ORACLE side chooses enemy themes)
-// =========================
-type OracleUltPickItem = {
-  targetId: string;
-  targetName: string;
-  team: TeamId;
-  choices: ThemeCard[];
-};
-
-type OracleUltPickState = null | {
-  active: true;
-  createdAt: number;
-  byId: string;
-  byName: string;
-  targetTeam: TeamId; // enemy team
-  idx: number; // current pick index
-  items: OracleUltPickItem[];
-};
-
-const OracleUltPickModal = ({
-  state,
-  busy,
-  canControl,
-  onClose,
-  onPick,
-}: {
-  state: OracleUltPickState;
-  busy: boolean;
-  canControl: boolean;
-  onClose: () => void;
-  onPick: (targetId: string, cand: ThemeCard) => void;
-}) => {
-  if (!state) return null;
-  const item = state.items?.[state.idx];
-  if (!item) return null;
-
-  return (
-    <div className="fixed inset-0 z-[245] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => !busy && onClose()} />
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative w-full max-w-5xl rounded-2xl border border-white/15 bg-[#0f172a] p-1 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="rounded-xl p-6 md:p-8 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xs font-mono tracking-widest text-yellow-300">ORACLE ULT</div>
-              <div className="text-2xl md:text-3xl font-black tracking-tight text-white mt-1">CHOOSE ENEMY THEME</div>
-              <div className="text-[11px] md:text-xs font-mono tracking-widest text-white/50 mt-1">
-                {state.byName} が選択中（敵は選択できません） / {state.idx + 1} / {state.items.length}
-              </div>
-            </div>
-            <button
-              disabled={busy}
-              onClick={onClose}
-              className="px-3 py-2 rounded-xl border border-white/10 text-white/60 hover:bg-white/5 text-xs font-black tracking-widest"
-            >
-              CLOSE
-            </button>
-          </div>
-
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-4">
-            <div className="text-[10px] font-mono tracking-widest text-white/40">TARGET</div>
-            <div className="text-white font-black mt-1">
-              {item.targetName} <span className="text-white/50 text-sm font-mono">/ TEAM {item.team}</span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-            {item.choices.map((cand, i) => (
-              <button
-                key={`${item.targetId}-${i}-${cardTitle(cand)}`}
-                disabled={busy || !canControl}
-                onClick={() => onPick(item.targetId, cand)}
-                className={`p-4 rounded-2xl border text-left transition-all ${
-                  busy || !canControl ? 'border-white/10 bg-black/20 opacity-60 cursor-not-allowed' : 'border-yellow-500/30 bg-yellow-500/10 hover:bg-yellow-500/20 hover:scale-[1.01]'
-                }`}
-              >
-                <div className="text-[9px] font-mono tracking-widest text-yellow-200">OPTION {i + 1}</div>
-                <div className="mt-1 text-white font-black break-words">{cardTitle(cand)}</div>
-                <div className="mt-1 text-[11px] text-white/60 font-mono break-words">{cardCriteria(cand)}</div>
-              </button>
-            ))}
-          </div>
-
-          {!canControl && (
-            <div className="mt-4 text-[10px] font-mono tracking-widest text-red-300 border border-red-500/30 bg-red-500/10 px-3 py-2 rounded-xl">
-              YOU CANNOT CONTROL THIS ORACLE PICK
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </div>
-  );
-};
-
-// =========================
-// Main Screen
-// =========================
 export const GamePlayTeamScreen = () => {
   const navigate = useNavigate();
   const { messages, addToast, removeToast } = useToast();
@@ -1010,8 +119,85 @@ export const GamePlayTeamScreen = () => {
   const [abilityFx, setAbilityFx] = useState<AbilityFx>(null);
   const lastFxTimestampRef = useRef<number>(0);
 
+  // Pending turn-start effects (applied after action log closes)
+  const pendingTurnStartRef = useRef<boolean>(false);
+
   const clearAbilityFx = useCallback(() => setAbilityFx(null), []);
-  const clearActionLog = useCallback(() => setActiveActionLog(null), []);
+  const clearActionLog = useCallback(() => {
+    setActiveActionLog(null);
+    // Apply pending turn-start effects after action log closes
+    if (pendingTurnStartRef.current && roomId) {
+      pendingTurnStartRef.current = false;
+      setTimeout(async () => {
+        // Apply turn-start effects inline
+        setBusy(true);
+        try {
+          await roomTransaction(roomId, async (data, ref, tx) => {
+            const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+            const mems = normalizeMembers(data.members || []);
+            const idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
+            const singer = mems[idx];
+            if (!singer) return;
+
+            let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
+            const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A, B: teamScoresTx.B };
+
+            const auraPlans = planStartAuras(mems, singer, teamScoresTx, teamBuffsTx);
+            if (auraPlans.length === 0) return; // No turn-start effects
+
+            const auraChanges: ScoreChange[] = [];
+            for (const ap of auraPlans) {
+              const from = teamScoresTx[ap.team] ?? 0;
+              const to = from + ap.delta;
+              teamScoresTx = { ...teamScoresTx, [ap.team]: to };
+              auraChanges.push({ scope: 'TEAM', target: `TEAM ${ap.team}`, from, to, delta: ap.delta, reason: `AURA: ${ap.reason}` });
+            }
+
+            const auraLines = auraChanges.map(fmtChangeLine);
+
+            const turnStartEntry: LogEntry = {
+              ts: Date.now(),
+              kind: 'TURN',
+              actorName: singer?.name,
+              actorId: singer?.id,
+              team: singer?.team,
+              title: 'TURN START',
+              lines: [
+                `NOTE: ${singer?.name || '???'} (TEAM ${singer?.team || '?'})`,
+                '— TURN START EFFECTS —',
+                ...auraLines,
+              ],
+            };
+
+            const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
+            const newEntries = capEntries([...entries, turnStartEntry]);
+
+            const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
+              const from = teamScoresBefore[team] ?? 0;
+              const to = teamScoresTx[team] ?? 0;
+              const delta = to - from;
+              return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
+            });
+
+            const newLogs = capLogs([
+              ...(data.logs || []),
+              `TURN START: ${singer?.name || '???'} (TEAM ${singer?.team || '?'})`,
+              ...auraLines.map((x) => ` - ${x}`),
+            ]);
+
+            tx.update(ref, {
+              teamScores: teamScoresTx,
+              logs: newLogs,
+              logEntries: newEntries,
+              lastLog: { timestamp: Date.now(), title: 'TURN START', detail: overlayTeamLines.join('\n') },
+            });
+          });
+        } finally {
+          setBusy(false);
+        }
+      }, 300); // Small delay to ensure clean transition
+    }
+  }, [roomId]);
 
   // init lock
   const initLockRef = useRef(false);
@@ -1187,44 +373,20 @@ export const GamePlayTeamScreen = () => {
     initLockRef.current = true;
 
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
-
-        const data: any = snap.data();
+      await roomTransaction(roomId, async (data, ref, tx) => {
         if (data.status !== 'playing' || data.mode !== 'team') return;
 
         let changed = false;
 
-        let mems = (data.members || []).slice().sort(sortByTurn);
+        let mems = normalizeMembers(data.members || []);
 
-        mems = mems.map((m: any) => {
-          const rid: RoleId | undefined = m.role?.id;
-          const defUses = defaultRoleUses(rid);
-          const prevSkill = m.role?.skillUses;
-          const prevUlt = m.role?.ultUses;
-
-          if (m.role && (prevSkill === undefined || prevSkill === null || prevUlt === undefined || prevUlt === null)) changed = true;
-
-          const role = m.role
-            ? {
-                ...m.role,
-                skillUses: prevSkill ?? defUses.skillUses,
-                ultUses: prevUlt ?? defUses.ultUses,
-              }
-            : null;
-
-          return {
-            ...m,
-            score: m.score ?? 0,
-            combo: m.combo ?? 0,
-            buffs: m.buffs ?? {},
-            debuffs: m.debuffs ?? {},
-            candidates: Array.isArray(m.candidates) ? m.candidates : null,
-            challenge: m.challenge ?? null,
-            role,
-          };
+        // Check if any member had missing role uses
+        mems.forEach((m: any) => {
+          const prevSkill = (data.members || []).find((orig: any) => orig.id === m.id)?.role?.skillUses;
+          const prevUlt = (data.members || []).find((orig: any) => orig.id === m.id)?.role?.ultUses;
+          if (m.role && (prevSkill === undefined || prevSkill === null || prevUlt === undefined || prevUlt === null)) {
+            changed = true;
+          }
         });
 
         let maxOrder = mems.reduce((mx: number, m: any) => (typeof m.turnOrder === 'number' ? Math.max(mx, m.turnOrder) : mx), -1);
@@ -1332,7 +494,7 @@ export const GamePlayTeamScreen = () => {
 
   // ★ IMPORTANT: DBにultUsesが無い(古いデータ)でも、UI側はデフォルト値でボタンを押せるようにする
   const currentRoleId = (currentSinger?.role?.id as RoleId | undefined) || undefined;
-  const defaultsForCurrent = defaultRoleUses(currentRoleId);
+  const defaultsForCurrent = getDefaultRoleUses(currentRoleId);
   const skillUsesLeft = currentSinger?.role ? (currentSinger.role.skillUses ?? defaultsForCurrent.skillUses) : 0;
   const ultUsesLeft = currentSinger?.role ? (currentSinger.role.ultUses ?? defaultsForCurrent.ultUses) : 0;
 
@@ -1459,12 +621,8 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
 
         const idx = mems.findIndex((m: any) => m.id === targetMemberId);
@@ -1545,12 +703,8 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const state: OracleUltPickState = data.oracleUltPick || null;
         if (!state?.active) return;
 
@@ -1629,7 +783,7 @@ export const GamePlayTeamScreen = () => {
   };
 
   const requestPickRole = (roleId: RoleId) => {
-    const def = ROLE_DEFS.find((r) => r.id === roleId);
+    const def = getRoleById(roleId);
     if (!def) return;
 
     if (usedRoleIds.has(roleId)) {
@@ -1676,12 +830,8 @@ export const GamePlayTeamScreen = () => {
     if (!roomId || !userId) return;
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
         const idx = mems.findIndex((m: any) => m.id === userId);
         if (idx === -1) return;
@@ -1727,17 +877,13 @@ export const GamePlayTeamScreen = () => {
 
   const saveMyRole = async (roleId: RoleId) => {
     if (!roomId || !userId) return;
-    const def = ROLE_DEFS.find((r) => r.id === roleId);
+    const def = getRoleById(roleId);
     if (!def) return;
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
         const idx = mems.findIndex((m: any) => m.id === userId);
         if (idx === -1) return;
@@ -1752,7 +898,7 @@ export const GamePlayTeamScreen = () => {
         if (used.has(def.id)) throw new Error('RoleAlreadyUsed');
 
         const updated = { ...(mems[idx] || {}) };
-        const uses = defaultRoleUses(def.id);
+        const uses = getDefaultRoleUses(def.id);
         updated.role = { id: def.id, name: def.name, skillUses: uses.skillUses, ultUses: uses.ultUses };
         updated.score = updated.score ?? 0;
         updated.combo = updated.combo ?? 0;
@@ -1793,69 +939,61 @@ export const GamePlayTeamScreen = () => {
   // =========================
   // Ability Requests
   // =========================
-  const requestUseSkill = () => {
+  // Target modal configuration for abilities
+  // =========================
+  const TARGET_SKILL_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
+    coach: { title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' },
+    saboteur: { title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' },
+    oracle: { title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' },
+    hype: { title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' },
+  };
+
+  const TARGET_ULT_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
+    coach: { title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' },
+  };
+
+  const requestUseAbility = (kind: 'skill' | 'ult') => {
     if (!currentSinger?.role) return;
-    if (!canUseSkill) return;
+    const canUse = kind === 'skill' ? canUseSkill : canUseUlt;
+    if (!canUse) return;
     if (oracleUltPick?.active) return; // ORACLE pick中はロック
 
     const rid: RoleId = currentSinger.role.id;
 
-    // target skills
-    if (rid === 'coach') return setTargetModal({ title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' });
-    if (rid === 'saboteur') return setTargetModal({ title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' });
-    if (rid === 'oracle') return setTargetModal({ title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' });
-    if (rid === 'hype') return setTargetModal({ title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' });
+    // Check if this ability requires target selection
+    const targetConfig = kind === 'skill' ? TARGET_SKILL_CONFIG[rid] : TARGET_ULT_CONFIG[rid];
+    if (targetConfig) {
+      return setTargetModal(targetConfig);
+    }
 
-    const def = roleDef(rid);
+    // Show confirmation modal for non-target abilities
+    const def = getRoleById(rid);
+    const usesLeft = kind === 'skill' ? skillUsesLeft : ultUsesLeft;
+    const abilityName = kind === 'skill' ? 'SKILL' : 'ULT';
+    const abilityColor = kind === 'skill' ? 'text-cyan-300' : 'text-yellow-300';
+    const abilityDesc = kind === 'skill' ? def?.skill : def?.ult;
+
     setConfirmState({
-      title: 'CONFIRM SKILL',
+      title: `CONFIRM ${abilityName}`,
       body: (
         <div className="space-y-3">
           <div className="text-white/80">
-            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-cyan-300">SKILL</span> を発動しますか？
+            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className={`font-black ${abilityColor}`}>{abilityName}</span> を発動しますか？
           </div>
-          <div className="text-[12px] text-white/70 leading-relaxed">{def?.skill}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {skillUsesLeft}</div>
+          <div className="text-[12px] text-white/70 leading-relaxed">{abilityDesc}</div>
+          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {usesLeft}</div>
         </div>
       ),
       confirmText: 'ACTIVATE',
       onConfirm: async () => {
         setConfirmState(null);
-        await applyAbility({ kind: 'skill' });
+        await applyAbility({ kind });
       },
     });
   };
 
-  const requestUseUlt = () => {
-    if (!currentSinger?.role) return;
-    if (!canUseUlt) return;
-    if (oracleUltPick?.active) return; // ORACLE pick中はロック
-
-    const rid: RoleId = currentSinger.role.id;
-
-    // target ults
-    if (rid === 'coach') return setTargetModal({ title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' });
-
-    // ✅ FIX: MIMIC ULTはターゲット不要（味方全員に次ターンMIMICパッシブ付与）
-    const def = roleDef(rid);
-    setConfirmState({
-      title: 'CONFIRM ULT',
-      body: (
-        <div className="space-y-3">
-          <div className="text-white/80">
-            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-yellow-300">ULT</span> を発動しますか？
-          </div>
-          <div className="text-[12px] text-white/70 leading-relaxed">{def?.ult}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {ultUsesLeft}</div>
-        </div>
-      ),
-      confirmText: 'ACTIVATE',
-      onConfirm: async () => {
-        setConfirmState(null);
-        await applyAbility({ kind: 'ult' });
-      },
-    });
-  };
+  const requestUseSkill = () => requestUseAbility('skill');
+  const requestUseUlt = () => requestUseAbility('ult');
 
   const requestConfirmTarget = (action: NonNullable<TargetModalState>['action'], targetId: string) => {
     if (!currentSinger?.role) return;
@@ -1863,7 +1001,7 @@ export const GamePlayTeamScreen = () => {
     const target = sortedMembers.find((m) => m.id === targetId);
     if (!target) return;
 
-    const effectiveRoleName = roleDef(rid)?.name || 'ROLE';
+    const effectiveRoleName = getRoleById(rid)?.name || 'ROLE';
 
     const kind = action === 'coach_ult' ? 'ult' : 'skill';
     const title = kind === 'ult' ? 'CONFIRM ULT TARGET' : 'CONFIRM SKILL TARGET';
@@ -1916,47 +1054,17 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
 
         // ORACLE pickが既に動いている間は新規発動不可（事故防止）
         if (data.oracleUltPick?.active) return;
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
-        const mems = (data.members || [])
-          .map((m: any) => {
-            const rid: RoleId | undefined = m.role?.id;
-            const uses = defaultRoleUses(rid);
-            const role = m.role
-              ? {
-                  ...m.role,
-                  skillUses: m.role.skillUses ?? uses.skillUses,
-                  ultUses: m.role.ultUses ?? uses.ultUses,
-                }
-              : null;
+        let mems = normalizeMembers(data.members || []);
 
-            return {
-              ...m,
-              score: m.score ?? 0,
-              combo: m.combo ?? 0,
-              buffs: m.buffs ?? {},
-              debuffs: m.debuffs ?? {},
-              role,
-              candidates: Array.isArray(m.candidates) ? m.candidates : null,
-              challenge: m.challenge ?? null,
-            };
-          })
-          .slice()
-          .sort(sortByTurn);
-
-        let idx = data.currentTurnIndex ?? 0;
-        if (idx >= mems.length) idx = 0;
-        if (mems.length > 0 && !isReadyForTurn(mems[idx])) idx = findFirstReadyIndex(mems);
+        let idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
 
         const singer = mems[idx];
         if (!singer) return;
@@ -2000,9 +1108,7 @@ export const GamePlayTeamScreen = () => {
 
         // score helpers (detailed)
         const scoreChanges: ScoreChange[] = [];
-        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
-        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
-        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
+        let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
 
         const recordTeam = (team: TeamId, delta: number, reason: string) => {
           if (!delta) return;
@@ -2024,195 +1130,70 @@ export const GamePlayTeamScreen = () => {
           singer.role.ultUses -= 1;
         }
 
-        // ---- NORMAL SKILL ----
-        if (kind === 'skill') {
-          if (r === 'maestro') {
-            singer.buffs.maestroSkill = true;
-            pushLines.push(`SKILL MAESTRO: armed (success COMBO+2 / fail -500)`);
-          } else if (r === 'showman') {
-            singer.buffs.encore = true;
-            pushLines.push(`SKILL SHOWMAN: armed (+500 on success)`);
-          } else if (r === 'gambler') {
-            singer.buffs.doubleDown = true;
-            singer.buffs.gamblerSkillClampPassive = true;
-            pushLines.push(`SKILL GAMBLER: DOUBLE DOWN armed (success x2 / fail -2000) + passive clamp`);
-          } else if (r === 'underdog') {
-            const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
-            const steal = clamp(Math.round(diff * 0.2), 0, 2000);
-            recordTeam(t, +steal, `UNDERDOG SKILL (steal 20% up to 2000)`);
-            recordTeam(et, -steal, `UNDERDOG SKILL (stolen by TEAM ${t})`);
-            pushLines.push(`SKILL UNDERDOG: steal ${steal} from TEAM ${et}`);
-          } else if (r === 'hype') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id };
-            pushLines.push(`SKILL HYPE: ${target.name} next 2 turns (success +500)`);
-          } else if (r === 'mimic') {
-            singer.buffs.echo = true;
-            pushLines.push(`SKILL MIMIC: ECHO armed (copy 50% last turn delta)`);
-          } else if (r === 'ironwall') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negHalfTurns: 1, negZeroTurns: 0 };
-            pushLines.push(`SKILL IRONWALL: next TEAM ${t} turn negative -50%`);
-          } else if (r === 'coach') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.safe = true;
-            pushLines.push(`SKILL COACH: TIMEOUT -> ${target.name} (SAFE)`);
-          } else if (r === 'saboteur') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== et) return;
-            target.debuffs.sabotaged = { by: singer.id, fail: -1000 };
-            pushLines.push(`SKILL SABOTEUR: sabotaged -> ${target.name} (success +0 / fail -1000)`);
-          } else if (r === 'oracle') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const targetIdx = mems.findIndex((m: any) => m.id === targetId);
-            if (targetIdx === -1) return;
+        // ---- ABILITY HANDLING ----
+        // Use handlers from abilities/
+        const handler = getAbilityHandler(r, kind);
+        if (handler) {
+          const handlerResult = handler({
+            singer,
+            singerId: singer.id,
+            team: t,
+            enemyTeam: et,
+            roleId: r,
+            members: mems,
+            teamBuffs: teamBuffsTx,
+            teamScores: teamScoresTx,
+            deck,
+            pool,
+            kind,
+            targetId: opts.targetId,
+            logs: pushLines,
+            logEntries: entries,
+            rerollThreeChoicesKeepFirst,
+          });
 
-            const target = { ...mems[targetIdx] };
-            if (target.team !== t) return;
-
-            const res = rerollThreeChoicesKeepFirst(target, deck, pool);
-            deck = res.nextDeck;
-            deckChanged = true;
-
-            target.candidates = res.choices;
-            target.challenge = res.current;
-
-            mems[targetIdx] = target;
-            pushLines.push(`SKILL ORACLE: REROLL -> ${target.name} (opt1=current)`);
+          if (handlerResult.success === false) {
+            // Handler returned failure (e.g., invalid target)
+            return;
           }
-        }
 
-        // ---- NORMAL ULT (incl. MIMIC) ----
-        if (kind === 'ult') {
-          if (r === 'maestro') {
-            const combo = singer.combo ?? 0;
-            const gain = combo * 800;
-            recordTeam(t, gain, `MAESTRO ULT (FINALE: combo x800)`);
-            singer.combo = 0;
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 500 };
-            pushLines.push(`ULT MAESTRO: FINALE team +${gain}, next success +500`);
-          } else if (r === 'showman') {
-            singer.buffs.spotlight = true;
-            pushLines.push(`ULT SHOWMAN: armed (success enemy -2000)`);
-          } else if (r === 'ironwall') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negZeroTurns: 1, negHalfTurns: 0 };
-            pushLines.push(`ULT IRONWALL: next TEAM ${t} turn negative -> 0`);
-          } else if (r === 'coach') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.forcedSuccess = { by: singer.id };
-            pushLines.push(`ULT COACH: ${target.name} next turn FORCED SUCCESS`);
-          } else if (r === 'hype') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
-            pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
-          } else if (r === 'saboteur') {
-            // ✅ FIX: 次の敵1人ではなく「敵全員の次の自分の番」1回分 SEALED
-            teamBuffsTx[et] = {
-              ...(teamBuffsTx[et] || {}),
-              lastTeamDelta: 0,
-              nextSuccessBonus: 0,
-              hypeUltTurns: 0,
-              negHalfTurns: 0,
-              negZeroTurns: 0,
-              sealedTurns: 0,
-            };
-
-            const affected: string[] = [];
-            for (let i = 0; i < mems.length; i++) {
-              if (mems[i]?.team === et) {
-                const name = mems[i]?.name;
-                mems[i] = {
-                  ...mems[i],
-                  buffs: {},
-                  debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } },
-                };
-                if (name) affected.push(name);
+          // Apply handler results
+          if (handlerResult.members) {
+            mems = handlerResult.members;
+          }
+          if (handlerResult.teamBuffs) {
+            // Apply team buffs properly (teamBuffsTx is a Proxy, can't use Object.assign)
+            for (const teamKey of ['A', 'B'] as const) {
+              if (handlerResult.teamBuffs[teamKey]) {
+                teamBuffsTx[teamKey] = handlerResult.teamBuffs[teamKey];
               }
             }
-
-            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects RESET`);
-            pushLines.push(`ULT SABOTEUR: SEALED (PERSONAL) applied to ALL enemies for their next personal turn`);
-            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
-          } else if (r === 'underdog') {
-            const my = teamScoresTx[t] ?? 0;
-            const opp = teamScoresTx[et] ?? 0;
-
-            if (my < opp) {
-              const targetScore = opp - 2000;
-              const delta = Math.max(0, targetScore - my);
-              if (delta > 0) recordTeam(t, delta, 'UNDERDOG ULT (catch up to opp-2000)');
-              pushLines.push(`ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`);
-            } else {
-              recordTeam(t, 2000, 'UNDERDOG ULT (winning: +2000)');
-              pushLines.push(`ULT UNDERDOG: winning => team +2000`);
-            }
-          } else if (r === 'gambler') {
-            singer.buffs.gamblerUlt = true;
-            pushLines.push(`ULT GAMBLER: coinflip armed (+5000 / -1000)`);
-          } else if (r === 'oracle') {
-            // ✅ FIX: 敵に3択を渡すのはNG -> ORACLE側が敵全員分「自分で選択して確定」する
-            const enemyReady = mems.filter((m: any) => isReadyForTurn(m) && m.team === et);
-            const items: OracleUltPickItem[] = [];
-
-            for (const em of enemyReady) {
-              const cur = em.challenge ?? { title: 'FREE THEME', criteria: '—' };
-              const d2 = drawFromDeck<ThemeCard>(deck, pool, 2);
-              deck = d2.nextDeck;
-              deckChanged = true;
-
-              const extra = d2.choices || [];
-              const choices: ThemeCard[] = [cur, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
-              items.push({ targetId: em.id, targetName: em.name, team: em.team, choices });
-            }
-
-            if (items.length === 0) {
-              pushLines.push(`ULT ORACLE: no enemy targets`);
-            } else {
-              pushLines.push(`ULT ORACLE: choose themes for ALL enemies (enemy cannot choose)`);
-              pushLines.push(`TARGETS: ${items.map((x) => x.targetName).join(', ')}`);
-            }
-
-            const oraclePickState: OracleUltPickState =
-              items.length > 0
-                ? {
-                    active: true,
-                    createdAt: Date.now(),
-                    byId: singer.id,
-                    byName: singer.name,
-                    targetTeam: et,
-                    idx: 0,
-                    items,
-                  }
-                : null;
-
-            (data as any).__oraclePickState = oraclePickState;
-          } else if (r === 'mimic') {
-            // ✅ FIX: MIMIC ULT -> 味方全員の「次の自分のターン」に MIMICパッシブ付与（1ターン）
-            const affected: string[] = [];
-            for (let i = 0; i < mems.length; i++) {
-              if (mems[i]?.team === t) {
-                mems[i] = {
-                  ...mems[i],
-                  buffs: {
-                    ...(mems[i].buffs || {}),
-                    mimicPassiveTurns: Math.max(1, mems[i]?.buffs?.mimicPassiveTurns ?? 0),
-                  },
-                };
-                affected.push(mems[i]?.name);
+          }
+          if (handlerResult.deck) {
+            deck = handlerResult.deck;
+            deckChanged = true;
+          }
+          if (handlerResult.logs) {
+            pushLines.push(...handlerResult.logs);
+          }
+          if (handlerResult.logEntries) {
+            entries.push(...handlerResult.logEntries);
+          }
+          if (handlerResult.scoreChanges) {
+            scoreChanges.push(...handlerResult.scoreChanges);
+            // Apply score changes to teamScoresTx
+            for (const change of handlerResult.scoreChanges) {
+              if (change.scope === 'TEAM') {
+                teamScoresTx = { ...teamScoresTx, [change.target.replace('TEAM ', '')]: change.to };
+              } else if (change.scope === 'PLAYER') {
+                // For PLAYER scope, find the player's team and add delta to team score
+                const currentTeamScore = teamScoresTx[singer.team] || 0;
+                teamScoresTx = { ...teamScoresTx, [singer.team]: currentTeamScore + change.delta };
               }
             }
-            pushLines.push(`ULT MIMIC: grant MIMIC PASSIVE to ALL allies for their next personal turn`);
-            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
+          }
+          if (handlerResult.oracleUltPick !== undefined) {
+            (data as any).__oraclePickState = handlerResult.oracleUltPick;
           }
         }
 
@@ -2279,47 +1260,17 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
 
         // ORACLE pick中はターン進行禁止
         if (data.oracleUltPick?.active) return;
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
-        let mems = (data.members || [])
-          .map((m: any) => {
-            const rid: RoleId | undefined = m.role?.id;
-            const uses = defaultRoleUses(rid);
-            const role = m.role
-              ? {
-                  ...m.role,
-                  skillUses: m.role.skillUses ?? uses.skillUses,
-                  ultUses: m.role.ultUses ?? uses.ultUses,
-                }
-              : null;
+        let mems = normalizeMembers(data.members || []);
 
-            return {
-              ...m,
-              score: m.score ?? 0,
-              combo: m.combo ?? 0,
-              buffs: m.buffs ?? {},
-              debuffs: m.debuffs ?? {},
-              role,
-              candidates: Array.isArray(m.candidates) ? m.candidates : null,
-              challenge: m.challenge ?? null,
-            };
-          })
-          .slice()
-          .sort(sortByTurn);
-
-        let idx = data.currentTurnIndex ?? 0;
-        if (idx >= mems.length) idx = 0;
-        if (mems.length > 0 && !isReadyForTurn(mems[idx])) idx = findFirstReadyIndex(mems);
+        let idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
 
         const singer = mems[idx];
         if (!singer) return;
@@ -2327,11 +1278,8 @@ export const GamePlayTeamScreen = () => {
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
 
-        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
-        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
-        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
-
-        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A ?? 0, B: teamScoresTx.B ?? 0 };
+        let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
+        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A, B: teamScoresTx.B };
 
         const serial = data.turnSerial ?? 0;
 
@@ -2347,33 +1295,12 @@ export const GamePlayTeamScreen = () => {
         const changes: ScoreChange[] = [];
         const notes: string[] = [];
 
-        const hasIronwallPassive = (team: TeamId) => mems.some((m: any) => m.team === team && m.role?.id === 'ironwall');
-
         const mitigateNegative = (team: TeamId, delta: number, reason: string) => {
-          if (delta >= 0) return delta;
-
-          let d = delta;
-
-          // ironwall skill/ult mitigation (active only on that team's turn)
-          if (team === t) {
-            if (negZeroActive) {
-              notes.push(`NOTE TEAM ${team}: IRONWALL ULT -> negative blocked (${fmt(d)}) [${reason}]`);
-              d = 0;
-            } else if (negHalfActive) {
-              const reduced = Math.round(d * 0.5);
-              notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
-              d = reduced;
-            }
-          }
-
-          // ironwall passive (disabled while sealed)
-          if (!sealedThisTurn && hasIronwallPassive(team) && d < 0) {
-            const reduced = Math.round(d * 0.7);
-            notes.push(`NOTE TEAM ${team}: IRONWALL PASSIVE reduced (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
-            d = reduced;
-          }
-
-          return d;
+          // Use the target team's buff status, not the current team's
+          const targetNegZeroActive = (teamBuffsTx?.[team]?.negZeroTurns ?? 0) > 0;
+          const targetNegHalfActive = !targetNegZeroActive && (teamBuffsTx?.[team]?.negHalfTurns ?? 0) > 0;
+          const targetSealed = (teamBuffsTx?.[team]?.sealedTurns ?? 0) > 0;
+          return mitigateNegativeHelper(team, t, delta, reason, targetNegZeroActive, targetNegHalfActive, mems, targetSealed, notes);
         };
 
         let singerTurnDelta = 0;
@@ -2439,52 +1366,63 @@ export const GamePlayTeamScreen = () => {
 
         // Passives / Buffs (disabled if sealed)
         if (!sealedThisTurn && !sabotageActive) {
-          // SHOWMAN passive
-          if (rid === 'showman' && effectiveSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
+          // Use passive handlers
+          if (rid) {
+            const passiveHandler = getPassiveHandler(rid);
+            if (passiveHandler) {
+              const passiveResult = passiveHandler({
+                singer,
+                isSuccess: effectiveSuccess,
+                sealed: sealedThisTurn,
+                sabotaged: sabotageActive,
+                team: t,
+                enemyTeam: et,
+                teamBuffs: teamBuffsTx,
+                notes,
+              });
 
-          // SABOTEUR passive
-          if (rid === 'saboteur' && effectiveSuccess) applyTeamDelta(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
-
-          // MAESTRO passive
-          if (rid === 'maestro') {
-            if (effectiveSuccess) {
-              const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
-              singer.combo = nextCombo;
-              const bonus = 250 * nextCombo;
-              applySingerDelta(bonus, `MAESTRO PASSIVE (COMBO x${nextCombo} => +${bonus})`);
-            } else {
-              const had = singer.combo ?? 0;
-              singer.combo = 0;
-              if (had > 0) notes.push(`NOTE MAESTRO: COMBO broken (no score penalty)`);
+              if (passiveResult.scoreDelta !== undefined && passiveResult.reason) {
+                applySingerDelta(passiveResult.scoreDelta, passiveResult.reason);
+              }
+              if (passiveResult.enemyScoreDelta !== undefined && passiveResult.enemyReason) {
+                applyTeamDelta(et, passiveResult.enemyScoreDelta, passiveResult.enemyReason);
+              }
+              if (passiveResult.notes) {
+                notes.push(...passiveResult.notes);
+              }
+              if (passiveResult.singerUpdates) {
+                Object.assign(singer, passiveResult.singerUpdates);
+              }
             }
           }
 
-          // ✅ FIX: GAMBLER passive (success: 0..1000, fail: 0..-1000) step 100
-          if (rid === 'gambler') {
-            const clampFlag = !!singer.buffs?.gamblerSkillClampPassive;
-            if (effectiveSuccess) {
-              const step = 100;
-              const steps = 11; // 0..1000 => 11 values
-              const bonus = step * Math.floor(Math.random() * steps); // 0..1000
-              applySingerDelta(bonus, `GAMBLER PASSIVE (RNG bonus)`);
-            } else {
-              const step = 100;
-              const steps = 11; // 0..-1000 => 11 values
-              const raw = -step * Math.floor(Math.random() * steps); // 0, -100, ..., -1000
-              const applied = clampFlag && raw < 0 ? 0 : raw;
-              if (clampFlag && raw < 0) notes.push(`NOTE GAMBLER SKILL: PASSIVE clamp (${raw} -> 0)`);
-              applySingerDelta(applied, `GAMBLER PASSIVE (RNG penalty)`);
-            }
-          }
+          // MIMIC shared passive (from MIMIC ULT) - applies to all allies regardless of role
+          if ((singer.buffs?.mimicPassiveTurns ?? 0) > 0 && rid !== 'mimic') {
+            const mimicHandler = getPassiveHandler('mimic');
+            if (mimicHandler) {
+              const mimicResult = mimicHandler({
+                singer,
+                isSuccess: effectiveSuccess,
+                sealed: sealedThisTurn,
+                sabotaged: sabotageActive,
+                team: t,
+                enemyTeam: et,
+                teamBuffs: teamBuffsTx,
+                notes,
+              });
 
-          // ✅ FIX: MIMIC passive (self) + shared by MIMIC ULT (buff: mimicPassiveTurns)
-          const mimicSharedTurns = singer.buffs?.mimicPassiveTurns ?? 0;
-          const canUseMimicPassive = rid === 'mimic' || mimicSharedTurns > 0;
-          if (canUseMimicPassive && effectiveSuccess) {
-            const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
-            if (last > 0) {
-              const bonus = Math.round(last * 0.3);
-              applySingerDelta(bonus, rid === 'mimic' ? `MIMIC PASSIVE (30% of last ally success ${last})` : `MIMIC PASSIVE (shared) (30% of last ally success ${last})`);
+              if (mimicResult.scoreDelta !== undefined && mimicResult.reason) {
+                applySingerDelta(mimicResult.scoreDelta, mimicResult.reason);
+              }
+              if (mimicResult.enemyScoreDelta !== undefined && mimicResult.enemyReason) {
+                applyTeamDelta(et, mimicResult.enemyScoreDelta, mimicResult.enemyReason);
+              }
+              if (mimicResult.notes) {
+                notes.push(...mimicResult.notes);
+              }
+              if (mimicResult.singerUpdates) {
+                Object.assign(singer, mimicResult.singerUpdates);
+              }
             }
           }
 
@@ -2508,74 +1446,7 @@ export const GamePlayTeamScreen = () => {
 
         // Skill/Ult armed effects (disabled if sealed; and also suppressed by sabotage override)
         if (!sealedThisTurn && !sabotageActive) {
-          // MAESTRO skill
-          if (singer.buffs?.maestroSkill) {
-            if (!effectiveSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
-            else {
-              const before = singer.combo ?? 0;
-              const after = clamp(before + 2, 0, 5);
-              singer.combo = after;
-              notes.push(`NOTE MAESTRO SKILL: COMBO +2 (x${before} -> x${after})`);
-            }
-            singer.buffs.maestroSkill = false;
-          }
-
-          // SHOWMAN skill
-          if (singer.buffs?.encore) {
-            if (effectiveSuccess) applySingerDelta(500, 'SHOWMAN SKILL (+500 on success)');
-            singer.buffs.encore = false;
-          }
-
-          // GAMBLER skill (double down)
-          if (singer.buffs?.doubleDown) {
-            if (effectiveSuccess) {
-              const extra = singerTurnDelta;
-              applySingerDelta(extra, 'GAMBLER SKILL (DOUBLE DOWN x2)');
-            } else {
-              applySingerDelta(-2000, 'GAMBLER SKILL (DOUBLE DOWN fail -2000)');
-            }
-            singer.buffs.doubleDown = false;
-            singer.buffs.gamblerSkillClampPassive = false;
-          } else {
-            if (singer.buffs?.gamblerSkillClampPassive) singer.buffs.gamblerSkillClampPassive = false;
-          }
-
-          // GAMBLER ult coinflip
-          if (singer.buffs?.gamblerUlt) {
-            const head = Math.random() < 0.5;
-            const delta = head ? 5000 : -1000;
-            applySingerDelta(delta, `GAMBLER ULT (coinflip ${head ? 'HEAD +5000' : 'TAIL -1000'})`);
-            singer.buffs.gamblerUlt = false;
-          }
-
-          // SHOWMAN ult (success enemy -2000)
-          if (singer.buffs?.spotlight) {
-            if (effectiveSuccess) applyTeamDelta(et, -2000, 'SHOWMAN ULT (success enemy -2000)');
-            singer.buffs.spotlight = false;
-          }
-
-          // MIMIC skill ECHO
-          if (singer.buffs?.echo) {
-            const lastTurn = data.lastTurnDelta ?? 0;
-            const add = Math.round(lastTurn * 0.5);
-            applySingerDelta(add, `MIMIC SKILL (ECHO 50% of last turn ${fmt(lastTurn)})`);
-            singer.buffs.echo = false;
-          }
-
-          // HYPE skill (next 2 turns success +500)
-          if (singer.buffs?.hypeBoost?.turns) {
-            const turns = singer.buffs.hypeBoost.turns as number;
-            if (effectiveSuccess) applySingerDelta(500, 'HYPE SKILL (success +500)');
-            const next = Math.max(0, turns - 1);
-            singer.buffs.hypeBoost.turns = next;
-            if (next === 0) singer.buffs.hypeBoost = null;
-          }
-
-          // COACH skill SAFE
-          if (!effectiveSuccess && singer.buffs?.safe) {
-            applyTeamDelta(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
-            singer.buffs.safe = false;
-          }
+          processArmedBuffs(singer, effectiveSuccess, singerTurnDelta, notes, applySingerDelta, applyTeamDelta, et, data.lastTurnDelta);
         } else {
           if (sealedThisTurn) notes.push('NOTE SEALED: passive/skill/ult effects disabled');
         }
@@ -2592,6 +1463,9 @@ export const GamePlayTeamScreen = () => {
         else teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), lastTeamDelta: teamBuffsTx[t]?.lastTeamDelta ?? 0 };
 
         const lastTurnDelta = singerTurnDelta;
+
+        // Store lastTurnDelta on singer for MIMIC skill echo
+        singer.lastTurnDelta = lastTurnDelta;
 
         // Decrement sealed/neg buffs if active on this team's turn
         if (sealedTeamThisTurn) teamBuffsTx[t].sealedTurns = Math.max(0, (teamBuffsTx[t].sealedTurns ?? 0) - 1);
@@ -2623,21 +1497,10 @@ export const GamePlayTeamScreen = () => {
         }
 
         const nextIndex = findNextReadyIndex(mems, idx);
-        const nextSingerLocal = mems[nextIndex] || singer;
-
-        const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx, teamBuffsTx);
-        const auraChanges: ScoreChange[] = [];
-        for (const ap of auraPlans) {
-          const from = teamScoresTx[ap.team] ?? 0;
-          const to = from + ap.delta;
-          teamScoresTx = { ...teamScoresTx, [ap.team]: to };
-          auraChanges.push({ scope: 'TEAM', target: `TEAM ${ap.team}`, from, to, delta: ap.delta, reason: `AURA: ${ap.reason}` });
-        }
 
         const nextSerial = serial + 1;
 
         const changeLines = changes.map(fmtChangeLine);
-        const auraLines = auraChanges.map(fmtChangeLine);
 
         const themeLine = `THEME ${cardTitle(currentChallengeLocal)} / ${cardCriteria(currentChallengeLocal)}`;
 
@@ -2657,21 +1520,8 @@ export const GamePlayTeamScreen = () => {
           ],
         };
 
-        const turnEntry: LogEntry = {
-          ts: Date.now(),
-          kind: 'TURN',
-          actorName: nextSingerLocal?.name,
-          actorId: nextSingerLocal?.id,
-          team: nextSingerLocal?.team,
-          title: 'NEXT TURN',
-          lines: [
-            `NOTE NEXT: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
-            ...(auraLines.length ? ['— AURA SCORE CHANGES (turn start) —', ...auraLines] : []),
-          ],
-        };
-
         const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
-        const newEntries = capEntries([...entries, resultEntry, turnEntry]);
+        const newEntries = capEntries([...entries, resultEntry]);
 
         const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
           const from = teamScoresBefore[team] ?? 0;
@@ -2687,8 +1537,6 @@ export const GamePlayTeamScreen = () => {
           `RESULT: ${singer.name} ${effectiveSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t}) net ${fmt(singerTurnDelta)}`,
           ...changeLines.map((x) => ` - ${x}`),
           ...(notes.length ? notes.map((x) => ` - ${x}`) : []),
-          `TURN START: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
-          ...auraLines.map((x) => ` - ${x}`),
         ]);
 
         tx.update(ref, {
@@ -2708,6 +1556,9 @@ export const GamePlayTeamScreen = () => {
           turnAbilityUsed: false,
         });
       });
+
+      // Mark turn-start effects as pending (will be applied after action log closes)
+      pendingTurnStartRef.current = true;
     } finally {
       setBusy(false);
     }
@@ -2816,24 +1667,11 @@ export const GamePlayTeamScreen = () => {
                 <p className="text-yellow-200 font-bold text-sm tracking-widest mt-1 uppercase">PROXY FOR: {proxyTarget.name}</p>
               </div>
 
-              <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
-                <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                  {(proxyTarget.candidates || []).map((cand: any, idx2: number) => (
-                    <motion.button
-                      key={idx2}
-                      whileHover={{ scale: 1.05, borderColor: '#facc15' }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => requestPickCandidate(proxyTarget.id, cand, true)}
-                      disabled={busy || isOraclePickingActive}
-                      className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
-                    >
-                      <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
-                      <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
-                      <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
-                    </motion.button>
-                  ))}
-                </div>
-              </div>
+              <ThemeSelectionGrid
+                candidates={proxyTarget.candidates || []}
+                onSelect={(cand) => requestPickCandidate(proxyTarget.id, cand, true)}
+                disabled={busy || isOraclePickingActive}
+              />
 
               <button onClick={() => setProxyTarget(null)} className="mt-2 px-8 py-2 rounded-lg border border-white/20 hover:bg-white/10 text-gray-400 font-bold text-xs tracking-widest">
                 CANCEL PROXY
@@ -3038,24 +1876,11 @@ export const GamePlayTeamScreen = () => {
                   )}
                 </div>
 
-                <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
-                  <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                    {displayCandidates.map((cand: any, idx2: number) => (
-                      <motion.button
-                        key={`${cardTitle(cand)}-${idx2}`}
-                        whileHover={{ scale: 1.05, borderColor: '#facc15' }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => requestPickCandidate(selectionOwner.id, cand, false)}
-                        disabled={busy || isOraclePickingActive}
-                        className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
-                      >
-                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
-                        <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
-                        <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
-                      </motion.button>
-                    ))}
-                  </div>
-                </div>
+                <ThemeSelectionGrid
+                  candidates={displayCandidates}
+                  onSelect={(cand) => requestPickCandidate(selectionOwner.id, cand, false)}
+                  disabled={busy || isOraclePickingActive}
+                />
               </motion.div>
             ) : (
               <MissionDisplay

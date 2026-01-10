@@ -92,13 +92,82 @@ npm run deploy
 
 ```
 src/
-├── components/     # 再利用可能なUIコンポーネント
-├── screens/        # 各画面のコンポーネント
-├── hooks/          # カスタムReact Hooks
-├── firebase.ts     # Firebase設定
-├── App.tsx         # メインアプリケーション
-└── main.tsx        # エントリーポイント
+├── components/               # 再利用可能なUIコンポーネント
+│   ├── team-battle/          # チームバトルモード用コンポーネント
+│   │   ├── overlays/         # オーバーレイ表示コンポーネント
+│   │   │   ├── ActionOverlay.tsx       # ターン結果表示
+│   │   │   └── AbilityFxOverlay.tsx    # スキル/ULTエフェクト
+│   │   ├── modals/           # モーダルダイアログコンポーネント
+│   │   │   ├── ConfirmModal.tsx        # 汎用確認ダイアログ
+│   │   │   ├── JoinTeamRoleModal.tsx   # チーム・ロール選択
+│   │   │   ├── TargetModal.tsx         # ターゲット選択
+│   │   │   ├── GuideModal.tsx          # ロールガイド
+│   │   │   └── OracleUltPickModal.tsx  # Oracle ULTお題選択
+│   │   ├── MissionDisplay.tsx          # お題表示
+│   │   └── ThemeSelectionGrid.tsx      # お題選択グリッド
+│   └── Toast.tsx             # トースト通知
+├── firebase/                 # Firebase関連
+│   ├── index.ts              # Firebase設定
+│   └── transactionHelper.ts  # トランザクションヘルパー
+├── game/                     # ゲームロジック層
+│   └── team-battle/          # チームバトルモード用ロジック
+│       ├── abilities/        # ロール能力ハンドラー (1ファイル1ロール)
+│       │   ├── types.ts      # ハンドラー型定義
+│       │   ├── helpers.ts    # 共通ヘルパー関数
+│       │   ├── index.ts      # ハンドラーレジストリ
+│       │   ├── maestro.ts    # Maestro SKILL/ULT/PASSIVE
+│       │   ├── showman.ts    # Showman SKILL/ULT/PASSIVE
+│       │   ├── ironwall.ts   # Ironwall SKILL/ULT
+│       │   ├── coach.ts      # Coach SKILL/ULT
+│       │   ├── oracle.ts     # Oracle SKILL/ULT
+│       │   ├── mimic.ts      # Mimic SKILL/ULT/PASSIVE
+│       │   ├── hype.ts       # Hype SKILL/ULT
+│       │   ├── saboteur.ts   # Saboteur SKILL/ULT/PASSIVE
+│       │   ├── underdog.ts   # Underdog SKILL/ULT
+│       │   └── gambler.ts    # Gambler SKILL/ULT/PASSIVE
+│       ├── roles/            # ロール定義 (1ファイル1ロール)
+│       │   ├── types.ts      # ロール関連の型定義
+│       │   ├── index.ts      # ロール統合エクスポート
+│       │   ├── maestro.ts    # Maestroロール定義
+│       │   ├── showman.ts    # Showmanロール定義
+│       │   ├── ironwall.ts   # Ironwallロール定義
+│       │   ├── coach.ts      # Coachロール定義
+│       │   ├── oracle.ts     # Oracleロール定義
+│       │   ├── mimic.ts      # Mimicロール定義
+│       │   ├── hype.ts       # Hypeロール定義
+│       │   ├── saboteur.ts   # Saboteurロール定義
+│       │   ├── underdog.ts   # Underdogロール定義
+│       │   └── gambler.ts    # Gamblerロール定義
+│       ├── armedBuffHandlers.ts  # Armed buffハンドラー
+│       ├── memberUtils.ts        # メンバー正規化
+│       ├── resultProcessor.ts    # 結果処理ユーティリティ
+│       ├── scoring.ts            # スコア計算・ターン順制御
+│       ├── theme.ts              # お題カード管理
+│       ├── transactionUtils.ts   # トランザクションユーティリティ
+│       ├── types.ts              # ゲーム内型定義
+│       └── utils.ts              # 共通ユーティリティ関数
+├── screens/                  # 各画面のコンポーネント
+├── hooks/                    # カスタムReact Hooks
+│   ├── usePresence.ts        # プレゼンス管理
+│   └── useWakeLock.ts        # Wake Lock管理
+├── App.tsx                   # メインアプリケーション
+└── main.tsx                  # エントリーポイント
 ```
+
+### モジュール設計
+
+**ゲームロジックとUI層の分離**: `src/game/` ディレクトリにビジネスロジックを集約し、`src/components/` にUI層を配置することで、保守性と拡張性を向上させています。
+
+**1ファイル1ロールパターン**: 各ロールは2つの独立したファイルとして管理されています:
+- `roles/` - ロールの基本定義（名前、説明、初期値等）
+- `abilities/` - ロールの能力実装（SKILL/ULT/PASSIVE）
+
+新しいロールの追加は以下の手順で行います:
+1. `roles/newrole.ts` でロール定義を作成
+2. `abilities/newrole.ts` でハンドラー関数を実装
+3. 各ファイルの `index.ts` でエクスポート
+
+**能力ハンドラーパターン**: 全てのロール能力は統一されたインターフェース（`AbilityHandler`, `PassiveHandler`）を実装し、レジストリから取得して実行されます。これにより、メインロジックを変更せずに新しいロールを追加できます。
 
 ## 主要な画面
 
