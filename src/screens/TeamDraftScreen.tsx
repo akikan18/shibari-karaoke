@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { planStartAuras, normalizeTeamBuffs } from '../game/team-battle/scoring';
 
 // --------------------
 // Role Definitions (Updated)
@@ -493,8 +494,50 @@ export const TeamDraftScreen = () => {
 
     setOrderEditBusy(true);
     try {
-      await updateDoc(doc(db, 'rooms', roomId), {
-        status: 'playing',
+      await runTransaction(db, async (transaction) => {
+        const roomRef = doc(db, 'rooms', roomId);
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+
+        const data = roomSnap.data();
+        const members = Array.isArray(data.members) ? data.members : [];
+
+        // Sort members by turn order to find first singer
+        const sorted = members.slice().sort((a: any, b: any) => (a.turnOrder ?? 9999) - (b.turnOrder ?? 9999));
+        const firstSinger = sorted[0];
+
+        if (!firstSinger) {
+          // No valid first singer, just update status
+          transaction.update(roomRef, { status: 'playing' });
+          return;
+        }
+
+        // Calculate turn-start effects for first turn using planStartAuras
+        const teamBuffs = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+        const currentTeamScores = data.teamScores || { A: 0, B: 0 };
+
+        const auraPlans = planStartAuras(members, firstSinger, currentTeamScores, teamBuffs);
+
+        let turnStartBonus = 0;
+        const logs: string[] = [];
+
+        for (const plan of auraPlans) {
+          turnStartBonus += plan.delta;
+          logs.push(`TURN START: ${plan.reason} ${plan.delta >= 0 ? '+' : ''}${plan.delta}`);
+        }
+
+        // Apply turn-start bonus to team score
+        const team = firstSinger.team;
+        const updatedTeamScores = {
+          A: team === 'A' ? (currentTeamScores.A ?? 0) + turnStartBonus : currentTeamScores.A ?? 0,
+          B: team === 'B' ? (currentTeamScores.B ?? 0) + turnStartBonus : currentTeamScores.B ?? 0,
+        };
+
+        transaction.update(roomRef, {
+          status: 'playing',
+          teamScores: updatedTeamScores,
+          logs: [...(data.logs || []), ...logs],
+        });
       });
     } finally {
       setOrderEditBusy(false);
