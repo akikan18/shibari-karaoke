@@ -58,7 +58,7 @@ export const planStartAuras = (
 
   const enemyTeam: TeamId = team === 'A' ? 'B' : 'A';
 
-  // Check all turn-start passive handlers
+  // Check all turn-start passive handlers (all roles, as some check team-wide conditions like COACH)
   for (const [roleId, handler] of Object.entries(turnStartPassiveHandlers)) {
     if (!handler) continue;
 

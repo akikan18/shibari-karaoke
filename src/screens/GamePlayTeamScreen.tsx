@@ -1253,12 +1253,6 @@ export const GamePlayTeamScreen = () => {
     if (!canControlTurn) return;
     if (isCurrentSingerLocked) return;
 
-    // Apply turn-start effects first if this is turn 0
-    const serial = roomData?.turnSerial ?? 0;
-    if (serial === 0) {
-      await applyTurnStartEffects();
-    }
-
     setBusy(true);
     try {
       await roomTransaction(roomId, async (data, ref, tx) => {
