@@ -1170,12 +1170,90 @@ export const GamePlayTeamScreen = () => {
   };
 
   // =========================
+  // Apply turn-start effects (separate transaction)
+  // =========================
+  const applyTurnStartEffects = async () => {
+    if (!roomId) return;
+    setBusy(true);
+    try {
+      await roomTransaction(roomId, async (data, ref, tx) => {
+        const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
+        const mems = normalizeMembers(data.members || []);
+        const idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
+        const singer = mems[idx];
+        if (!singer) return;
+
+        let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
+        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A, B: teamScoresTx.B };
+
+        const auraPlans = planStartAuras(mems, singer, teamScoresTx, teamBuffsTx);
+        if (auraPlans.length === 0) return; // No turn-start effects
+
+        const auraChanges: ScoreChange[] = [];
+        for (const ap of auraPlans) {
+          const from = teamScoresTx[ap.team] ?? 0;
+          const to = from + ap.delta;
+          teamScoresTx = { ...teamScoresTx, [ap.team]: to };
+          auraChanges.push({ scope: 'TEAM', target: `TEAM ${ap.team}`, from, to, delta: ap.delta, reason: `AURA: ${ap.reason}` });
+        }
+
+        const auraLines = auraChanges.map(fmtChangeLine);
+
+        const turnStartEntry: LogEntry = {
+          ts: Date.now(),
+          kind: 'TURN',
+          actorName: singer?.name,
+          actorId: singer?.id,
+          team: singer?.team,
+          title: 'TURN START',
+          lines: [
+            `NOTE: ${singer?.name || '???'} (TEAM ${singer?.team || '?'})`,
+            '— TURN START EFFECTS —',
+            ...auraLines,
+          ],
+        };
+
+        const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
+        const newEntries = capEntries([...entries, turnStartEntry]);
+
+        const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
+          const from = teamScoresBefore[team] ?? 0;
+          const to = teamScoresTx[team] ?? 0;
+          const delta = to - from;
+          return `TEAM ${team}: ${from.toLocaleString()} → ${to.toLocaleString()} (${fmt(delta)})`;
+        });
+
+        const newLogs = capLogs([
+          ...(data.logs || []),
+          `TURN START: ${singer?.name || '???'} (TEAM ${singer?.team || '?'})`,
+          ...auraLines.map((x) => ` - ${x}`),
+        ]);
+
+        tx.update(ref, {
+          teamScores: teamScoresTx,
+          logs: newLogs,
+          logEntries: newEntries,
+          lastLog: { timestamp: Date.now(), title: 'TURN START', detail: overlayTeamLines.join('\n') },
+        });
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // =========================
   // Resolve result (SUCCESS/FAIL)
   // =========================
   const resolveResult = async (isSuccess: boolean) => {
     if (!roomId || !currentSinger) return;
     if (!canControlTurn) return;
     if (isCurrentSingerLocked) return;
+
+    // Apply turn-start effects first if this is turn 0
+    const serial = roomData?.turnSerial ?? 0;
+    if (serial === 0) {
+      await applyTurnStartEffects();
+    }
 
     setBusy(true);
     try {
@@ -1416,21 +1494,10 @@ export const GamePlayTeamScreen = () => {
         }
 
         const nextIndex = findNextReadyIndex(mems, idx);
-        const nextSingerLocal = mems[nextIndex] || singer;
-
-        const auraPlans = planStartAuras(mems, nextSingerLocal, teamScoresTx, teamBuffsTx);
-        const auraChanges: ScoreChange[] = [];
-        for (const ap of auraPlans) {
-          const from = teamScoresTx[ap.team] ?? 0;
-          const to = from + ap.delta;
-          teamScoresTx = { ...teamScoresTx, [ap.team]: to };
-          auraChanges.push({ scope: 'TEAM', target: `TEAM ${ap.team}`, from, to, delta: ap.delta, reason: `AURA: ${ap.reason}` });
-        }
 
         const nextSerial = serial + 1;
 
         const changeLines = changes.map(fmtChangeLine);
-        const auraLines = auraChanges.map(fmtChangeLine);
 
         const themeLine = `THEME ${cardTitle(currentChallengeLocal)} / ${cardCriteria(currentChallengeLocal)}`;
 
@@ -1450,21 +1517,8 @@ export const GamePlayTeamScreen = () => {
           ],
         };
 
-        const turnEntry: LogEntry = {
-          ts: Date.now(),
-          kind: 'TURN',
-          actorName: nextSingerLocal?.name,
-          actorId: nextSingerLocal?.id,
-          team: nextSingerLocal?.team,
-          title: 'NEXT TURN',
-          lines: [
-            `NOTE NEXT: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
-            ...(auraLines.length ? ['— AURA SCORE CHANGES (turn start) —', ...auraLines] : []),
-          ],
-        };
-
         const entries: LogEntry[] = Array.isArray(data.logEntries) ? data.logEntries : [];
-        const newEntries = capEntries([...entries, resultEntry, turnEntry]);
+        const newEntries = capEntries([...entries, resultEntry]);
 
         const overlayTeamLines: string[] = (['A', 'B'] as TeamId[]).map((team) => {
           const from = teamScoresBefore[team] ?? 0;
@@ -1480,8 +1534,6 @@ export const GamePlayTeamScreen = () => {
           `RESULT: ${singer.name} ${effectiveSuccess ? 'SUCCESS' : 'FAIL'} (TEAM ${t}) net ${fmt(singerTurnDelta)}`,
           ...changeLines.map((x) => ` - ${x}`),
           ...(notes.length ? notes.map((x) => ` - ${x}`) : []),
-          `TURN START: ${nextSingerLocal?.name || '???'} (TEAM ${nextSingerLocal?.team || '?'})`,
-          ...auraLines.map((x) => ` - ${x}`),
         ]);
 
         tx.update(ref, {
@@ -1501,6 +1553,9 @@ export const GamePlayTeamScreen = () => {
           turnAbilityUsed: false,
         });
       });
+
+      // Apply next turn-start effects (separate transaction)
+      await applyTurnStartEffects();
     } finally {
       setBusy(false);
     }
