@@ -3,43 +3,44 @@ import { AbilityHandler } from './types';
 import { handleMaestroSkill, handleMaestroUlt } from './maestro';
 import { handleShowmanSkill, handleShowmanUlt } from './showman';
 import { handleIronwallSkill, handleIronwallUlt } from './ironwall';
+import { handleCoachSkill, handleCoachUlt } from './coach';
+import { handleOracleSkill, handleOracleUlt } from './oracle';
+import { handleMimicSkill, handleMimicUlt } from './mimic';
+import { handleHypeSkill, handleHypeUlt } from './hype';
+import { handleSaboteurSkill, handleSaboteurUlt } from './saboteur';
+import { handleUnderdogSkill, handleUnderdogUlt } from './underdog';
+import { handleGamblerSkill, handleGamblerUlt } from './gambler';
 
 /**
- * Skill handlers for each role
- *
- * Implemented: maestro, showman, ironwall
- * TODO: coach, oracle, mimic, hype, saboteur, underdog, gambler
+ * Skill handlers for each role (ALL 10 ROLES IMPLEMENTED)
  */
 export const skillHandlers: Partial<Record<RoleId, AbilityHandler>> = {
   maestro: handleMaestroSkill,
   showman: handleShowmanSkill,
   ironwall: handleIronwallSkill,
-  // coach: handleCoachSkill,
-  // oracle: handleOracleSkill,
-  // mimic: handleMimicSkill,
-  // hype: handleHypeSkill,
-  // saboteur: handleSaboteurSkill,
-  // underdog: handleUnderdogSkill,
-  // gambler: handleGamblerSkill,
+  coach: handleCoachSkill,
+  oracle: handleOracleSkill,
+  mimic: handleMimicSkill,
+  hype: handleHypeSkill,
+  saboteur: handleSaboteurSkill,
+  underdog: handleUnderdogSkill,
+  gambler: handleGamblerSkill,
 };
 
 /**
- * ULT handlers for each role
- *
- * Implemented: maestro, showman, ironwall
- * TODO: coach, oracle, mimic, hype, saboteur, underdog, gambler
+ * ULT handlers for each role (ALL 10 ROLES IMPLEMENTED)
  */
 export const ultHandlers: Partial<Record<RoleId, AbilityHandler>> = {
   maestro: handleMaestroUlt,
   showman: handleShowmanUlt,
   ironwall: handleIronwallUlt,
-  // coach: handleCoachUlt,
-  // oracle: handleOracleUlt,
-  // mimic: handleMimicUlt,
-  // hype: handleHypeUlt,
-  // saboteur: handleSaboteurUlt,
-  // underdog: handleUnderdogUlt,
-  // gambler: handleGamblerUlt,
+  coach: handleCoachUlt,
+  oracle: handleOracleUlt,
+  mimic: handleMimicUlt,
+  hype: handleHypeUlt,
+  saboteur: handleSaboteurUlt,
+  underdog: handleUnderdogUlt,
+  gambler: handleGamblerUlt,
 };
 
 /**
