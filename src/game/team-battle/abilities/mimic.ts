@@ -43,28 +43,31 @@ export const handleMimicSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Mimic ULT: Copy another ally's role skill/ult uses
+ * Mimic ULT: Grant MIMIC PASSIVE to all allies for their next personal turn
  */
 export const handleMimicUlt = (ctx: AbilityContext): AbilityResult => {
-  const { members, targetId, team, singer } = ctx;
+  const { members, team } = ctx;
 
-  if (!targetId) {
-    return { success: false, message: 'No target specified for Mimic ULT' };
+  const affected: string[] = [];
+  for (let i = 0; i < members.length; i++) {
+    if (members[i]?.team === team) {
+      members[i] = {
+        ...members[i],
+        buffs: {
+          ...(members[i].buffs || {}),
+          mimicPassiveTurns: Math.max(1, members[i]?.buffs?.mimicPassiveTurns ?? 0),
+        },
+      };
+      affected.push(members[i]?.name);
+    }
   }
 
-  const target = members.find((m: any) => m.id === targetId && m.team === team);
-  if (!target || !target.role) {
-    return { success: false, message: 'Invalid target for Mimic ULT' };
-  }
-
-  singer.buffs.mimicUltCopy = {
-    roleId: target.role.id,
-    roleName: target.role.name,
-  };
+  const logs = [`ULT MIMIC: grant MIMIC PASSIVE to ALL allies for their next personal turn`];
+  if (affected.length) logs.push(`AFFECTED: ${affected.join(', ')}`);
 
   return {
     success: true,
     members,
-    logs: [`ULT MIMIC: copied ${target.name}'s role (${target.role.name})`],
+    logs,
   };
 };

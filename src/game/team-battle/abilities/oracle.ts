@@ -39,19 +39,41 @@ export const handleOracleSkill = (ctx: AbilityContext): AbilityResult => {
  * Oracle ULT: Choose enemy themes (3 choices for each enemy)
  */
 export const handleOracleUlt = (ctx: AbilityContext): AbilityResult => {
-  const { singer, team, enemyTeam, members, deck, pool } = ctx;
+  const { singer, team, enemyTeam, members, deck, pool, rerollThreeChoicesKeepFirst } = ctx;
 
-  const enemies = members.filter((m: any) => m.team === enemyTeam);
-
-  const items = enemies.map((enemy: any) => {
-    const d = drawFromDeck(deck, pool, 3);
-    return {
-      targetId: enemy.id,
-      targetName: enemy.name,
-      team: enemyTeam,
-      choices: d.choices || [],
-    };
+  // Get ready enemies
+  const enemyReady = members.filter((m: any) => {
+    // isReadyForTurn check from original implementation
+    const hasChallenge = m.challenge && m.challenge.title;
+    const isReady = m.team === enemyTeam && hasChallenge;
+    return isReady;
   });
+
+  let currentDeck = deck;
+  const items = [];
+
+  for (const em of enemyReady) {
+    const cur = em.challenge ?? { title: 'FREE THEME', criteria: '—' };
+    const d2 = drawFromDeck(currentDeck, pool, 2);
+    currentDeck = d2.nextDeck;
+
+    const extra = d2.choices || [];
+    const choices = [cur, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
+    items.push({ targetId: em.id, targetName: em.name, team: em.team, choices });
+  }
+
+  if (items.length === 0) {
+    return {
+      success: true,
+      members,
+      logs: [`ULT ORACLE: no enemy targets`],
+    };
+  }
+
+  const logs = [
+    `ULT ORACLE: choose themes for ALL enemies (enemy cannot choose)`,
+    `TARGETS: ${items.map((x) => x.targetName).join(', ')}`,
+  ];
 
   const oracleUltPick = {
     active: true,
@@ -66,7 +88,8 @@ export const handleOracleUlt = (ctx: AbilityContext): AbilityResult => {
   return {
     success: true,
     members,
+    deck: currentDeck,
     oracleUltPick,
-    logs: [`ULT ORACLE: choosing themes for TEAM ${enemyTeam} (${enemies.length} enemies)`],
+    logs,
   };
 };

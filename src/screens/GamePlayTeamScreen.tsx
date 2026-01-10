@@ -1087,9 +1087,6 @@ export const GamePlayTeamScreen = () => {
           if (handlerResult.teamBuffs) {
             Object.assign(teamBuffsTx, handlerResult.teamBuffs);
           }
-          if (handlerResult.teamScores) {
-            Object.assign(teamScoresTx, handlerResult.teamScores);
-          }
           if (handlerResult.deck) {
             deck = handlerResult.deck;
             deckChanged = true;
@@ -1102,9 +1099,15 @@ export const GamePlayTeamScreen = () => {
           }
           if (handlerResult.scoreChanges) {
             scoreChanges.push(...handlerResult.scoreChanges);
+            // Apply score changes to teamScoresTx
+            for (const change of handlerResult.scoreChanges) {
+              if (change.scope === 'TEAM') {
+                teamScoresTx = { ...teamScoresTx, [change.target.replace('TEAM ', '')]: change.to };
+              }
+            }
           }
-          if ((handlerResult as any).oraclePickState !== undefined) {
-            (data as any).__oraclePickState = (handlerResult as any).oraclePickState;
+          if (handlerResult.oracleUltPick !== undefined) {
+            (data as any).__oraclePickState = handlerResult.oracleUltPick;
           }
         }
 

@@ -38,9 +38,11 @@ export type AbilityResult = {
   success: boolean;
   members?: any[];
   teamBuffs?: any;
+  teamScores?: { A: number; B: number };
   deck?: ThemeCard[];
   logs?: string[];
   logEntries?: LogEntry[];
+  scoreChanges?: any[];
   oracleUltPick?: any;
   message?: string;
 };

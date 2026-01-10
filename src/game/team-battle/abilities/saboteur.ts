@@ -38,21 +38,46 @@ export const handleSaboteurSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Saboteur ULT: Seal enemy for one turn (disable abilities)
+ * Saboteur ULT: Reset enemy team buffs and seal all enemies for one turn
  */
 export const handleSaboteurUlt = (ctx: AbilityContext): AbilityResult => {
-  const { members, targetId, team } = ctx;
+  const { members, team, enemyTeam, teamBuffs, singer } = ctx;
 
-  const target = validateEnemyTarget(members, targetId, team);
-  if (!target) {
-    return { success: false, message: 'Invalid target for Saboteur ULT' };
+  // Reset enemy team buffs
+  teamBuffs[enemyTeam] = {
+    ...(teamBuffs[enemyTeam] || {}),
+    lastTeamDelta: 0,
+    nextSuccessBonus: 0,
+    hypeUltTurns: 0,
+    negHalfTurns: 0,
+    negZeroTurns: 0,
+    sealedTurns: 0,
+  };
+
+  // Seal all enemies
+  const affected: string[] = [];
+  for (let i = 0; i < members.length; i++) {
+    if (members[i]?.team === enemyTeam) {
+      const name = members[i]?.name;
+      members[i] = {
+        ...members[i],
+        buffs: {},
+        debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } },
+      };
+      if (name) affected.push(name);
+    }
   }
 
-  target.debuffs.sealedOnce = true;
+  const logs = [
+    `ULT SABOTEUR: TEAM ${enemyTeam} effects RESET`,
+    `ULT SABOTEUR: SEALED (PERSONAL) applied to ALL enemies for their next personal turn`,
+  ];
+  if (affected.length) logs.push(`AFFECTED: ${affected.join(', ')}`);
 
   return {
     success: true,
     members,
-    logs: [`ULT SABOTEUR: ${target.name} SEALED (next turn abilities disabled)`],
+    teamBuffs,
+    logs,
   };
 };

@@ -1,5 +1,6 @@
 import { AbilityContext, AbilityResult } from './types';
 import { clamp } from '../utils';
+import type { ScoreChange } from '../types';
 
 /**
  * Underdog SKILL: Steal 20% of score difference (up to 2000)
@@ -10,33 +11,70 @@ export const handleUnderdogSkill = (ctx: AbilityContext): AbilityResult => {
   const diff = Math.abs((teamScores.A ?? 0) - (teamScores.B ?? 0));
   const steal = clamp(Math.round(diff * 0.2), 0, 2000);
 
+  const scoreChanges: ScoreChange[] = [
+    {
+      scope: 'TEAM',
+      target: `TEAM ${team}`,
+      from: teamScores[team] ?? 0,
+      to: (teamScores[team] ?? 0) + steal,
+      delta: steal,
+      reason: 'UNDERDOG SKILL (steal 20% up to 2000)',
+    },
+    {
+      scope: 'TEAM',
+      target: `TEAM ${enemyTeam}`,
+      from: teamScores[enemyTeam] ?? 0,
+      to: (teamScores[enemyTeam] ?? 0) - steal,
+      delta: -steal,
+      reason: `UNDERDOG SKILL (stolen by TEAM ${team})`,
+    },
+  ];
+
   return {
     success: true,
     members: ctx.members,
-    logs: [
-      `SKILL UNDERDOG: steal ${steal} from TEAM ${enemyTeam}`,
-      `NOTE: Score adjustment handled in game logic`,
-    ],
+    scoreChanges,
+    logs: [`SKILL UNDERDOG: steal ${steal} from TEAM ${enemyTeam}`],
   };
 };
 
 /**
- * Underdog ULT: Massive comeback bonus based on score deficit
+ * Underdog ULT: Catch up to opponent or gain bonus if winning
  */
 export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, enemyTeam, teamScores } = ctx;
 
   const myScore = teamScores[team] ?? 0;
-  const enemyScore = teamScores[enemyTeam] ?? 0;
-  const deficit = Math.max(0, enemyScore - myScore);
-  const comeback = clamp(Math.round(deficit * 0.5), 0, 5000);
+  const oppScore = teamScores[enemyTeam] ?? 0;
+
+  let delta = 0;
+  let reason = '';
+  let logMessage = '';
+
+  if (myScore < oppScore) {
+    const targetScore = oppScore - 2000;
+    delta = Math.max(0, targetScore - myScore);
+    reason = 'UNDERDOG ULT (catch up to opp-2000)';
+    logMessage = `ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`;
+  } else {
+    delta = 2000;
+    reason = 'UNDERDOG ULT (winning: +2000)';
+    logMessage = `ULT UNDERDOG: winning => team +2000`;
+  }
+
+  const scoreChanges: ScoreChange[] = delta > 0 ? [{
+    scope: 'TEAM',
+    target: `TEAM ${team}`,
+    from: myScore,
+    to: myScore + delta,
+    delta,
+    reason,
+  }] : [];
 
   return {
     success: true,
     members: ctx.members,
-    logs: [
-      `ULT UNDERDOG: COMEBACK BONUS +${comeback} (50% of deficit, max 5000)`,
-      `NOTE: Score adjustment handled in game logic`,
-    ],
+    scoreChanges,
+    logs: [logMessage],
   };
 };
