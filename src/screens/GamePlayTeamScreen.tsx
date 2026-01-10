@@ -54,6 +54,8 @@ import {
   cleanupMemberDebuffs,
 } from '../game/team-battle/resultProcessor';
 import { getAbilityHandler, getPassiveHandler } from '../game/team-battle/abilities';
+import { processArmedBuffs } from '../game/team-battle/armedBuffHandlers';
+import { initializeTeamScores, normalizeCurrentIndex } from '../game/team-battle/transactionUtils';
 
 // --- UI Components ---
 import { ActionOverlay } from '../components/team-battle/overlays/ActionOverlay';
@@ -860,69 +862,61 @@ export const GamePlayTeamScreen = () => {
   // =========================
   // Ability Requests
   // =========================
-  const requestUseSkill = () => {
+  // Target modal configuration for abilities
+  // =========================
+  const TARGET_SKILL_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
+    coach: { title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' },
+    saboteur: { title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' },
+    oracle: { title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' },
+    hype: { title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' },
+  };
+
+  const TARGET_ULT_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
+    coach: { title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' },
+  };
+
+  const requestUseAbility = (kind: 'skill' | 'ult') => {
     if (!currentSinger?.role) return;
-    if (!canUseSkill) return;
+    const canUse = kind === 'skill' ? canUseSkill : canUseUlt;
+    if (!canUse) return;
     if (oracleUltPick?.active) return; // ORACLE pick中はロック
 
     const rid: RoleId = currentSinger.role.id;
 
-    // target skills
-    if (rid === 'coach') return setTargetModal({ title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' });
-    if (rid === 'saboteur') return setTargetModal({ title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' });
-    if (rid === 'oracle') return setTargetModal({ title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' });
-    if (rid === 'hype') return setTargetModal({ title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' });
+    // Check if this ability requires target selection
+    const targetConfig = kind === 'skill' ? TARGET_SKILL_CONFIG[rid] : TARGET_ULT_CONFIG[rid];
+    if (targetConfig) {
+      return setTargetModal(targetConfig);
+    }
 
+    // Show confirmation modal for non-target abilities
     const def = getRoleById(rid);
+    const usesLeft = kind === 'skill' ? skillUsesLeft : ultUsesLeft;
+    const abilityName = kind === 'skill' ? 'SKILL' : 'ULT';
+    const abilityColor = kind === 'skill' ? 'text-cyan-300' : 'text-yellow-300';
+    const abilityDesc = kind === 'skill' ? def?.skill : def?.ult;
+
     setConfirmState({
-      title: 'CONFIRM SKILL',
+      title: `CONFIRM ${abilityName}`,
       body: (
         <div className="space-y-3">
           <div className="text-white/80">
-            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-cyan-300">SKILL</span> を発動しますか？
+            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className={`font-black ${abilityColor}`}>{abilityName}</span> を発動しますか？
           </div>
-          <div className="text-[12px] text-white/70 leading-relaxed">{def?.skill}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {skillUsesLeft}</div>
+          <div className="text-[12px] text-white/70 leading-relaxed">{abilityDesc}</div>
+          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {usesLeft}</div>
         </div>
       ),
       confirmText: 'ACTIVATE',
       onConfirm: async () => {
         setConfirmState(null);
-        await applyAbility({ kind: 'skill' });
+        await applyAbility({ kind });
       },
     });
   };
 
-  const requestUseUlt = () => {
-    if (!currentSinger?.role) return;
-    if (!canUseUlt) return;
-    if (oracleUltPick?.active) return; // ORACLE pick中はロック
-
-    const rid: RoleId = currentSinger.role.id;
-
-    // target ults
-    if (rid === 'coach') return setTargetModal({ title: 'COACH ULT: 味方を選択', mode: 'ally', action: 'coach_ult' });
-
-    // ✅ FIX: MIMIC ULTはターゲット不要（味方全員に次ターンMIMICパッシブ付与）
-    const def = getRoleById(rid);
-    setConfirmState({
-      title: 'CONFIRM ULT',
-      body: (
-        <div className="space-y-3">
-          <div className="text-white/80">
-            <span className="font-black">{def?.name || 'ROLE'}</span> の <span className="font-black text-yellow-300">ULT</span> を発動しますか？
-          </div>
-          <div className="text-[12px] text-white/70 leading-relaxed">{def?.ult}</div>
-          <div className="text-[10px] font-mono tracking-widest text-white/40">USES LEFT: {ultUsesLeft}</div>
-        </div>
-      ),
-      confirmText: 'ACTIVATE',
-      onConfirm: async () => {
-        setConfirmState(null);
-        await applyAbility({ kind: 'ult' });
-      },
-    });
-  };
+  const requestUseSkill = () => requestUseAbility('skill');
+  const requestUseUlt = () => requestUseAbility('ult');
 
   const requestConfirmTarget = (action: NonNullable<TargetModalState>['action'], targetId: string) => {
     if (!currentSinger?.role) return;
@@ -993,9 +987,7 @@ export const GamePlayTeamScreen = () => {
 
         let mems = normalizeMembers(data.members || []);
 
-        let idx = data.currentTurnIndex ?? 0;
-        if (idx >= mems.length) idx = 0;
-        if (mems.length > 0 && !isReadyForTurn(mems[idx])) idx = findFirstReadyIndex(mems);
+        let idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
 
         const singer = mems[idx];
         if (!singer) return;
@@ -1039,9 +1031,7 @@ export const GamePlayTeamScreen = () => {
 
         // score helpers (detailed)
         const scoreChanges: ScoreChange[] = [];
-        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
-        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
-        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
+        let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
 
         const recordTeam = (team: TeamId, delta: number, reason: string) => {
           if (!delta) return;
@@ -1191,9 +1181,7 @@ export const GamePlayTeamScreen = () => {
 
         let mems = normalizeMembers(data.members || []);
 
-        let idx = data.currentTurnIndex ?? 0;
-        if (idx >= mems.length) idx = 0;
-        if (mems.length > 0 && !isReadyForTurn(mems[idx])) idx = findFirstReadyIndex(mems);
+        let idx = normalizeCurrentIndex(data.currentTurnIndex ?? 0, mems, isReadyForTurn, findFirstReadyIndex);
 
         const singer = mems[idx];
         if (!singer) return;
@@ -1201,11 +1189,8 @@ export const GamePlayTeamScreen = () => {
         const t: TeamId = singer.team;
         const et: TeamId = t === 'A' ? 'B' : 'A';
 
-        let teamScoresTx: { A: number; B: number } = data.teamScores || computeTeamScores(mems);
-        if (teamScoresTx.A === undefined) teamScoresTx.A = 0;
-        if (teamScoresTx.B === undefined) teamScoresTx.B = 0;
-
-        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A ?? 0, B: teamScoresTx.B ?? 0 };
+        let teamScoresTx = initializeTeamScores(data.teamScores, computeTeamScores(mems));
+        const teamScoresBefore: { A: number; B: number } = { A: teamScoresTx.A, B: teamScoresTx.B };
 
         const serial = data.turnSerial ?? 0;
 
@@ -1363,74 +1348,7 @@ export const GamePlayTeamScreen = () => {
 
         // Skill/Ult armed effects (disabled if sealed; and also suppressed by sabotage override)
         if (!sealedThisTurn && !sabotageActive) {
-          // MAESTRO skill
-          if (singer.buffs?.maestroSkill) {
-            if (!effectiveSuccess) applySingerDelta(-500, 'MAESTRO SKILL (fail -500)');
-            else {
-              const before = singer.combo ?? 0;
-              const after = clamp(before + 2, 0, 5);
-              singer.combo = after;
-              notes.push(`NOTE MAESTRO SKILL: COMBO +2 (x${before} -> x${after})`);
-            }
-            singer.buffs.maestroSkill = false;
-          }
-
-          // SHOWMAN skill
-          if (singer.buffs?.encore) {
-            if (effectiveSuccess) applySingerDelta(500, 'SHOWMAN SKILL (+500 on success)');
-            singer.buffs.encore = false;
-          }
-
-          // GAMBLER skill (double down)
-          if (singer.buffs?.doubleDown) {
-            if (effectiveSuccess) {
-              const extra = singerTurnDelta;
-              applySingerDelta(extra, 'GAMBLER SKILL (DOUBLE DOWN x2)');
-            } else {
-              applySingerDelta(-2000, 'GAMBLER SKILL (DOUBLE DOWN fail -2000)');
-            }
-            singer.buffs.doubleDown = false;
-            singer.buffs.gamblerSkillClampPassive = false;
-          } else {
-            if (singer.buffs?.gamblerSkillClampPassive) singer.buffs.gamblerSkillClampPassive = false;
-          }
-
-          // GAMBLER ult coinflip
-          if (singer.buffs?.gamblerUlt) {
-            const head = Math.random() < 0.5;
-            const delta = head ? 5000 : -1000;
-            applySingerDelta(delta, `GAMBLER ULT (coinflip ${head ? 'HEAD +5000' : 'TAIL -1000'})`);
-            singer.buffs.gamblerUlt = false;
-          }
-
-          // SHOWMAN ult (success enemy -2000)
-          if (singer.buffs?.spotlight) {
-            if (effectiveSuccess) applyTeamDelta(et, -2000, 'SHOWMAN ULT (success enemy -2000)');
-            singer.buffs.spotlight = false;
-          }
-
-          // MIMIC skill ECHO
-          if (singer.buffs?.echo) {
-            const lastTurn = data.lastTurnDelta ?? 0;
-            const add = Math.round(lastTurn * 0.5);
-            applySingerDelta(add, `MIMIC SKILL (ECHO 50% of last turn ${fmt(lastTurn)})`);
-            singer.buffs.echo = false;
-          }
-
-          // HYPE skill (next 2 turns success +500)
-          if (singer.buffs?.hypeBoost?.turns) {
-            const turns = singer.buffs.hypeBoost.turns as number;
-            if (effectiveSuccess) applySingerDelta(500, 'HYPE SKILL (success +500)');
-            const next = Math.max(0, turns - 1);
-            singer.buffs.hypeBoost.turns = next;
-            if (next === 0) singer.buffs.hypeBoost = null;
-          }
-
-          // COACH skill SAFE
-          if (!effectiveSuccess && singer.buffs?.safe) {
-            applyTeamDelta(t, +300, 'COACH SKILL (SAFE: team +300 on fail)');
-            singer.buffs.safe = false;
-          }
+          processArmedBuffs(singer, effectiveSuccess, singerTurnDelta, notes, applySingerDelta, applyTeamDelta, et, data.lastTurnDelta);
         } else {
           if (sealedThisTurn) notes.push('NOTE SEALED: passive/skill/ult effects disabled');
         }
