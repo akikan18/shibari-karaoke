@@ -1,16 +1,19 @@
 import { RoleId } from '../roles';
 import { AbilityHandler } from './types';
+import { handleMaestroSkill, handleMaestroUlt } from './maestro';
+import { handleShowmanSkill, handleShowmanUlt } from './showman';
+import { handleIronwallSkill, handleIronwallUlt } from './ironwall';
 
 /**
  * Skill handlers for each role
  *
- * TODO: Extract actual skill logic from GamePlayTeamScreen.tsx
- * Each handler should be in a separate file (e.g., maestro.ts, showman.ts, etc.)
+ * Implemented: maestro, showman, ironwall
+ * TODO: coach, oracle, mimic, hype, saboteur, underdog, gambler
  */
 export const skillHandlers: Partial<Record<RoleId, AbilityHandler>> = {
-  // maestro: handleMaestroSkill,
-  // showman: handleShowmanSkill,
-  // ironwall: handleIronwallSkill,
+  maestro: handleMaestroSkill,
+  showman: handleShowmanSkill,
+  ironwall: handleIronwallSkill,
   // coach: handleCoachSkill,
   // oracle: handleOracleSkill,
   // mimic: handleMimicSkill,
@@ -23,12 +26,13 @@ export const skillHandlers: Partial<Record<RoleId, AbilityHandler>> = {
 /**
  * ULT handlers for each role
  *
- * TODO: Extract actual ult logic from GamePlayTeamScreen.tsx
+ * Implemented: maestro, showman, ironwall
+ * TODO: coach, oracle, mimic, hype, saboteur, underdog, gambler
  */
 export const ultHandlers: Partial<Record<RoleId, AbilityHandler>> = {
-  // maestro: handleMaestroUlt,
-  // showman: handleShowmanUlt,
-  // ironwall: handleIronwallUlt,
+  maestro: handleMaestroUlt,
+  showman: handleShowmanUlt,
+  ironwall: handleIronwallUlt,
   // coach: handleCoachUlt,
   // oracle: handleOracleUlt,
   // mimic: handleMimicUlt,
