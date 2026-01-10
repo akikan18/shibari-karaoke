@@ -1108,6 +1108,10 @@ export const GamePlayTeamScreen = () => {
             for (const change of handlerResult.scoreChanges) {
               if (change.scope === 'TEAM') {
                 teamScoresTx = { ...teamScoresTx, [change.target.replace('TEAM ', '')]: change.to };
+              } else if (change.scope === 'PLAYER') {
+                // For PLAYER scope, find the player's team and add delta to team score
+                const currentTeamScore = teamScoresTx[singer.team] || 0;
+                teamScoresTx = { ...teamScoresTx, [singer.team]: currentTeamScore + change.delta };
               }
             }
           }
