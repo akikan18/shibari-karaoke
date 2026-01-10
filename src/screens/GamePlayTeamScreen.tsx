@@ -1085,7 +1085,12 @@ export const GamePlayTeamScreen = () => {
             mems = handlerResult.members;
           }
           if (handlerResult.teamBuffs) {
-            Object.assign(teamBuffsTx, handlerResult.teamBuffs);
+            // Apply team buffs properly (teamBuffsTx is a Proxy, can't use Object.assign)
+            for (const teamKey of ['A', 'B'] as const) {
+              if (handlerResult.teamBuffs[teamKey]) {
+                teamBuffsTx[teamKey] = handlerResult.teamBuffs[teamKey];
+              }
+            }
           }
           if (handlerResult.deck) {
             deck = handlerResult.deck;
