@@ -1,6 +1,7 @@
 import { TeamId } from './roles';
 import { ScoreChange } from './types';
 import { fmt } from './utils';
+import { scoreModifierPassiveHandler } from './abilities';
 
 /**
  * Check if a team has Ironwall passive
@@ -9,13 +10,15 @@ export const hasIronwallPassive = (members: any[], team: TeamId): boolean =>
   members.some((m: any) => m.team === team && m.role?.id === 'ironwall');
 
 /**
- * Mitigate negative delta based on team buffs (Ironwall skill/ult)
+ * Mitigate negative delta based on team buffs (Ironwall skill/ult) and passive
  * @param team - The team receiving the delta
  * @param currentTeam - The team whose turn it is
  * @param delta - The score delta (can be negative)
  * @param reason - Description of the score change
  * @param negZeroActive - Whether IRONWALL ULT is active (negates all negative)
  * @param negHalfActive - Whether IRONWALL SKILL is active (halves negative)
+ * @param members - All members array (for passive check)
+ * @param sealed - Whether the team is sealed
  * @param notes - Array to append mitigation notes
  * @returns Mitigated delta value
  */
@@ -26,6 +29,8 @@ export const mitigateNegative = (
   reason: string,
   negZeroActive: boolean,
   negHalfActive: boolean,
+  members: any[],
+  sealed: boolean,
   notes: string[]
 ): number => {
   if (delta >= 0) return delta;
@@ -41,6 +46,24 @@ export const mitigateNegative = (
       const reduced = Math.round(d * 0.5);
       notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
       d = reduced;
+    }
+  }
+
+  // ironwall passive mitigation (disabled while sealed)
+  if (d < 0) {
+    const result = scoreModifierPassiveHandler({
+      team,
+      delta: d,
+      reason,
+      members,
+      sealed,
+    });
+
+    if (result.modifiedDelta !== d) {
+      d = result.modifiedDelta;
+      if (result.note) {
+        notes.push(`NOTE TEAM ${team}: ${result.note}`);
+      }
     }
   }
 

@@ -1,6 +1,24 @@
-import { AbilityContext, AbilityResult } from './types';
+import type { AbilityContext, AbilityResult, TurnStartPassiveContext, TurnStartPassiveResult } from './types';
 import { clamp } from '../utils';
-import type { ScoreChange } from '../types';
+import type { ScoreChange, TeamId } from '../types';
+
+/**
+ * Underdog PASSIVE: +500 when losing at turn start
+ */
+export const handleUnderdogTurnStartPassive = (ctx: TurnStartPassiveContext): TurnStartPassiveResult | null => {
+  const { nextSinger, team, teamScores } = ctx;
+
+  if (nextSinger.role?.id === 'underdog') {
+    const myScore = teamScores[team];
+    const oppTeam: TeamId = team === 'A' ? 'B' : 'A';
+    const oppScore = teamScores[oppTeam];
+    if (myScore < oppScore) {
+      return { delta: 500, reason: 'UNDERDOG パッシブ' };
+    }
+  }
+
+  return null;
+};
 
 /**
  * Underdog SKILL: Steal 20% of score difference (up to 2000)

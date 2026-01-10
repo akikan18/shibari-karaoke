@@ -47,7 +47,7 @@ import {
 } from '../game/team-battle/theme';
 import {
   hasIronwallPassive,
-  mitigateNegative,
+  mitigateNegative as mitigateNegativeHelper,
   applySingerDelta,
   applyTeamDelta,
   decrementBuffTurns,
@@ -1214,33 +1214,8 @@ export const GamePlayTeamScreen = () => {
         const changes: ScoreChange[] = [];
         const notes: string[] = [];
 
-        const hasIronwallPassive = (team: TeamId) => mems.some((m: any) => m.team === team && m.role?.id === 'ironwall');
-
         const mitigateNegative = (team: TeamId, delta: number, reason: string) => {
-          if (delta >= 0) return delta;
-
-          let d = delta;
-
-          // ironwall skill/ult mitigation (active only on that team's turn)
-          if (team === t) {
-            if (negZeroActive) {
-              notes.push(`NOTE TEAM ${team}: IRONWALL ULT -> negative blocked (${fmt(d)}) [${reason}]`);
-              d = 0;
-            } else if (negHalfActive) {
-              const reduced = Math.round(d * 0.5);
-              notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
-              d = reduced;
-            }
-          }
-
-          // ironwall passive (disabled while sealed)
-          if (!sealedThisTurn && hasIronwallPassive(team) && d < 0) {
-            const reduced = Math.round(d * 0.7);
-            notes.push(`NOTE TEAM ${team}: IRONWALL PASSIVE reduced (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
-            d = reduced;
-          }
-
-          return d;
+          return mitigateNegativeHelper(team, t, delta, reason, negZeroActive, negHalfActive, mems, sealedThisTurn, notes);
         };
 
         let singerTurnDelta = 0;

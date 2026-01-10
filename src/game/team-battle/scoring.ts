@@ -1,4 +1,5 @@
 import { TeamId } from './roles';
+import { turnStartPassiveHandlers } from './abilities';
 
 // =========================
 // Turn Order Helpers
@@ -55,24 +56,23 @@ export const planStartAuras = (
   const team = nextSinger.team as TeamId | undefined;
   if (!team) return plans;
 
-  // COACH パッシブ
-  const coachInTeam = mems.some((m) => m.team === team && m.role?.id === 'coach');
-  if (coachInTeam) {
-    plans.push({ team, delta: 150, reason: 'COACH パッシブ' });
-  }
+  const enemyTeam: TeamId = team === 'A' ? 'B' : 'A';
 
-  // HYPE ENGINE パッシブ
-  if (nextSinger.role?.id === 'hype') {
-    plans.push({ team, delta: 400, reason: 'HYPE ENGINE パッシブ' });
-  }
+  // Check all turn-start passive handlers
+  for (const [roleId, handler] of Object.entries(turnStartPassiveHandlers)) {
+    if (!handler) continue;
 
-  // UNDERDOG パッシブ
-  if (nextSinger.role?.id === 'underdog') {
-    const myScore = teamScores[team];
-    const oppTeam: TeamId = team === 'A' ? 'B' : 'A';
-    const oppScore = teamScores[oppTeam];
-    if (myScore < oppScore) {
-      plans.push({ team, delta: 500, reason: 'UNDERDOG パッシブ' });
+    const result = handler({
+      members: mems,
+      nextSinger,
+      team,
+      enemyTeam,
+      teamScores,
+      teamBuffs,
+    });
+
+    if (result && result.delta && result.reason) {
+      plans.push({ team, delta: result.delta, reason: result.reason });
     }
   }
 

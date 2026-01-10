@@ -82,3 +82,52 @@ export type PassiveResult = {
  * Passive handler function type
  */
 export type PassiveHandler = (context: PassiveContext) => PassiveResult;
+
+/**
+ * Context for turn-start passive handlers (Coach, Hype, Underdog)
+ */
+export type TurnStartPassiveContext = {
+  members: any[];
+  nextSinger: any;
+  team: TeamId;
+  enemyTeam: TeamId;
+  teamScores: { A: number; B: number };
+  teamBuffs: any;
+};
+
+/**
+ * Result from turn-start passive handlers
+ */
+export type TurnStartPassiveResult = {
+  delta?: number;
+  reason?: string;
+};
+
+/**
+ * Turn-start passive handler function type
+ */
+export type TurnStartPassiveHandler = (context: TurnStartPassiveContext) => TurnStartPassiveResult | null;
+
+/**
+ * Context for score modifier passive handlers (Ironwall)
+ */
+export type ScoreModifierContext = {
+  team: TeamId;
+  delta: number;
+  reason: string;
+  members: any[];
+  sealed: boolean;
+};
+
+/**
+ * Result from score modifier passive handlers
+ */
+export type ScoreModifierResult = {
+  modifiedDelta: number;
+  note?: string;
+};
+
+/**
+ * Score modifier passive handler function type
+ */
+export type ScoreModifierPassiveHandler = (context: ScoreModifierContext) => ScoreModifierResult;

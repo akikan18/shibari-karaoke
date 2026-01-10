@@ -1,5 +1,18 @@
-import { AbilityContext, AbilityResult } from './types';
+import type { AbilityContext, AbilityResult, TurnStartPassiveContext, TurnStartPassiveResult } from './types';
 import { validateAllyTarget } from './helpers';
+
+/**
+ * Hype PASSIVE: +400 at self turn start
+ */
+export const handleHypeTurnStartPassive = (ctx: TurnStartPassiveContext): TurnStartPassiveResult | null => {
+  const { nextSinger } = ctx;
+
+  if (nextSinger.role?.id === 'hype') {
+    return { delta: 400, reason: 'HYPE ENGINE パッシブ' };
+  }
+
+  return null;
+};
 
 /**
  * Hype SKILL: Give ally +500 on success for next 2 turns

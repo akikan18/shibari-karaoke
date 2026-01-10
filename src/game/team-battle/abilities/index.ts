@@ -1,14 +1,14 @@
 import { RoleId } from '../roles';
-import type { AbilityHandler, PassiveHandler } from './types';
+import type { AbilityHandler, PassiveHandler, TurnStartPassiveHandler, ScoreModifierPassiveHandler } from './types';
 import { handleMaestroSkill, handleMaestroUlt, handleMaestroPassive } from './maestro';
 import { handleShowmanSkill, handleShowmanUlt, handleShowmanPassive } from './showman';
-import { handleIronwallSkill, handleIronwallUlt } from './ironwall';
-import { handleCoachSkill, handleCoachUlt } from './coach';
+import { handleIronwallSkill, handleIronwallUlt, handleIronwallScoreModifier } from './ironwall';
+import { handleCoachSkill, handleCoachUlt, handleCoachTurnStartPassive } from './coach';
 import { handleOracleSkill, handleOracleUlt } from './oracle';
 import { handleMimicSkill, handleMimicUlt, handleMimicPassive } from './mimic';
-import { handleHypeSkill, handleHypeUlt } from './hype';
+import { handleHypeSkill, handleHypeUlt, handleHypeTurnStartPassive } from './hype';
 import { handleSaboteurSkill, handleSaboteurUlt, handleSaboteurPassive } from './saboteur';
-import { handleUnderdogSkill, handleUnderdogUlt } from './underdog';
+import { handleUnderdogSkill, handleUnderdogUlt, handleUnderdogTurnStartPassive } from './underdog';
 import { handleGamblerSkill, handleGamblerUlt, handleGamblerPassive } from './gambler';
 
 /**
@@ -44,10 +44,9 @@ export const ultHandlers: Partial<Record<RoleId, AbilityHandler>> = {
 };
 
 /**
- * Passive handlers for each role
+ * Passive handlers for each role (turn result passives)
  *
  * Implemented: maestro, showman, saboteur, gambler, mimic
- * No passive: ironwall, coach, oracle, hype, underdog
  */
 export const passiveHandlers: Partial<Record<RoleId, PassiveHandler>> = {
   maestro: handleMaestroPassive,
@@ -56,6 +55,20 @@ export const passiveHandlers: Partial<Record<RoleId, PassiveHandler>> = {
   gambler: handleGamblerPassive,
   mimic: handleMimicPassive,
 };
+
+/**
+ * Turn-start passive handlers (Coach, Hype, Underdog)
+ */
+export const turnStartPassiveHandlers: Partial<Record<RoleId, TurnStartPassiveHandler>> = {
+  coach: handleCoachTurnStartPassive,
+  hype: handleHypeTurnStartPassive,
+  underdog: handleUnderdogTurnStartPassive,
+};
+
+/**
+ * Score modifier passive handler (Ironwall)
+ */
+export const scoreModifierPassiveHandler: ScoreModifierPassiveHandler = handleIronwallScoreModifier;
 
 /**
  * Get ability handler for a role
@@ -75,6 +88,15 @@ export const getAbilityHandler = (roleId: RoleId, kind: 'skill' | 'ult'): Abilit
  */
 export const getPassiveHandler = (roleId: RoleId): PassiveHandler | null => {
   return passiveHandlers[roleId] || null;
+};
+
+/**
+ * Get turn-start passive handler for a role
+ * @param roleId - The role ID
+ * @returns The turn-start passive handler function, or null if not found
+ */
+export const getTurnStartPassiveHandler = (roleId: RoleId): TurnStartPassiveHandler | null => {
+  return turnStartPassiveHandlers[roleId] || null;
 };
 
 export * from './types';
