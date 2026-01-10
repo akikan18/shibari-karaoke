@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
 // --- Firebase ---
-import { doc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { roomTransaction } from '../firebase/transactionHelper';
 
 // --- Components & Hooks ---
 import { Toast, useToast } from '../components/Toast';
@@ -14,6 +15,7 @@ import { useWakeLock } from '../hooks/useWakeLock';
 // --- Game Logic & Types ---
 import { ALL_ROLES, RoleId, TeamId, getRoleById, getDefaultRoleUses } from '../game/team-battle/roles';
 import { LogKind, LogEntry, ScoreScope, ScoreChange } from '../game/team-battle/types';
+import { normalizeMember, normalizeMembers, Member } from '../game/team-battle/memberUtils';
 import {
   BASE_SUCCESS,
   BASE_FAIL,
@@ -282,44 +284,20 @@ export const GamePlayTeamScreen = () => {
     initLockRef.current = true;
 
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
-
-        const data: any = snap.data();
+      await roomTransaction(roomId, async (data, ref, tx) => {
         if (data.status !== 'playing' || data.mode !== 'team') return;
 
         let changed = false;
 
-        let mems = (data.members || []).slice().sort(sortByTurn);
+        let mems = normalizeMembers(data.members || []);
 
-        mems = mems.map((m: any) => {
-          const rid: RoleId | undefined = m.role?.id;
-          const defUses = getDefaultRoleUses(rid);
-          const prevSkill = m.role?.skillUses;
-          const prevUlt = m.role?.ultUses;
-
-          if (m.role && (prevSkill === undefined || prevSkill === null || prevUlt === undefined || prevUlt === null)) changed = true;
-
-          const role = m.role
-            ? {
-                ...m.role,
-                skillUses: prevSkill ?? defUses.skillUses,
-                ultUses: prevUlt ?? defUses.ultUses,
-              }
-            : null;
-
-          return {
-            ...m,
-            score: m.score ?? 0,
-            combo: m.combo ?? 0,
-            buffs: m.buffs ?? {},
-            debuffs: m.debuffs ?? {},
-            candidates: Array.isArray(m.candidates) ? m.candidates : null,
-            challenge: m.challenge ?? null,
-            role,
-          };
+        // Check if any member had missing role uses
+        mems.forEach((m: any) => {
+          const prevSkill = (data.members || []).find((orig: any) => orig.id === m.id)?.role?.skillUses;
+          const prevUlt = (data.members || []).find((orig: any) => orig.id === m.id)?.role?.ultUses;
+          if (m.role && (prevSkill === undefined || prevSkill === null || prevUlt === undefined || prevUlt === null)) {
+            changed = true;
+          }
         });
 
         let maxOrder = mems.reduce((mx: number, m: any) => (typeof m.turnOrder === 'number' ? Math.max(mx, m.turnOrder) : mx), -1);
@@ -554,12 +532,8 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
 
         const idx = mems.findIndex((m: any) => m.id === targetMemberId);
@@ -640,12 +614,8 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const state: OracleUltPickState = data.oracleUltPick || null;
         if (!state?.active) return;
 
@@ -771,12 +741,8 @@ export const GamePlayTeamScreen = () => {
     if (!roomId || !userId) return;
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
         const idx = mems.findIndex((m: any) => m.id === userId);
         if (idx === -1) return;
@@ -827,12 +793,8 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
         const mems = (data.members || []).slice().sort(sortByTurn);
         const idx = mems.findIndex((m: any) => m.id === userId);
         if (idx === -1) return;
@@ -1011,43 +973,15 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
 
         // ORACLE pickが既に動いている間は新規発動不可（事故防止）
         if (data.oracleUltPick?.active) return;
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
-        const mems = (data.members || [])
-          .map((m: any) => {
-            const rid: RoleId | undefined = m.role?.id;
-            const uses = getDefaultRoleUses(rid);
-            const role = m.role
-              ? {
-                  ...m.role,
-                  skillUses: m.role.skillUses ?? uses.skillUses,
-                  ultUses: m.role.ultUses ?? uses.ultUses,
-                }
-              : null;
-
-            return {
-              ...m,
-              score: m.score ?? 0,
-              combo: m.combo ?? 0,
-              buffs: m.buffs ?? {},
-              debuffs: m.debuffs ?? {},
-              role,
-              candidates: Array.isArray(m.candidates) ? m.candidates : null,
-              challenge: m.challenge ?? null,
-            };
-          })
-          .slice()
-          .sort(sortByTurn);
+        const mems = normalizeMembers(data.members || []);
 
         let idx = data.currentTurnIndex ?? 0;
         if (idx >= mems.length) idx = 0;
@@ -1374,43 +1308,15 @@ export const GamePlayTeamScreen = () => {
 
     setBusy(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const ref = doc(db, 'rooms', roomId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) return;
+      await roomTransaction(roomId, async (data, ref, tx) => {
 
-        const data: any = snap.data();
 
         // ORACLE pick中はターン進行禁止
         if (data.oracleUltPick?.active) return;
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
-        let mems = (data.members || [])
-          .map((m: any) => {
-            const rid: RoleId | undefined = m.role?.id;
-            const uses = getDefaultRoleUses(rid);
-            const role = m.role
-              ? {
-                  ...m.role,
-                  skillUses: m.role.skillUses ?? uses.skillUses,
-                  ultUses: m.role.ultUses ?? uses.ultUses,
-                }
-              : null;
-
-            return {
-              ...m,
-              score: m.score ?? 0,
-              combo: m.combo ?? 0,
-              buffs: m.buffs ?? {},
-              debuffs: m.debuffs ?? {},
-              role,
-              candidates: Array.isArray(m.candidates) ? m.candidates : null,
-              challenge: m.challenge ?? null,
-            };
-          })
-          .slice()
-          .sort(sortByTurn);
+        let mems = normalizeMembers(data.members || []);
 
         let idx = data.currentTurnIndex ?? 0;
         if (idx >= mems.length) idx = 0;

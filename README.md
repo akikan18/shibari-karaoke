@@ -92,13 +92,42 @@ npm run deploy
 
 ```
 src/
-├── components/     # 再利用可能なUIコンポーネント
-├── screens/        # 各画面のコンポーネント
-├── hooks/          # カスタムReact Hooks
-├── firebase.ts     # Firebase設定
-├── App.tsx         # メインアプリケーション
-└── main.tsx        # エントリーポイント
+├── components/           # 再利用可能なUIコンポーネント
+│   └── team-battle/      # チームバトルモード用コンポーネント
+│       ├── overlays/     # オーバーレイ表示コンポーネント
+│       ├── modals/       # モーダルダイアログコンポーネント
+│       └── MissionDisplay.tsx
+├── game/                 # ゲームロジック層
+│   └── team-battle/      # チームバトルモード用ロジック
+│       ├── roles/        # ロール定義 (1ファイル1ロール)
+│       │   ├── types.ts          # ロール関連の型定義
+│       │   ├── maestro.ts        # Maestroロール
+│       │   ├── showman.ts        # Showmanロール
+│       │   ├── ironwall.ts       # Ironwallロール
+│       │   ├── coach.ts          # Coachロール
+│       │   ├── oracle.ts         # Oracleロール
+│       │   ├── mimic.ts          # Mimicロール
+│       │   ├── hype.ts           # Hypeロール
+│       │   ├── saboteur.ts       # Saboteurロール
+│       │   ├── underdog.ts       # Underdogロール
+│       │   ├── gambler.ts        # Gamblerロール
+│       │   └── index.ts          # ロール統合エクスポート
+│       ├── types.ts      # ゲーム内型定義
+│       ├── utils.ts      # ユーティリティ関数
+│       ├── scoring.ts    # スコア計算・ターン順制御
+│       └── theme.ts      # お題カード管理
+├── screens/              # 各画面のコンポーネント
+├── hooks/                # カスタムReact Hooks
+├── firebase.ts           # Firebase設定
+├── App.tsx               # メインアプリケーション
+└── main.tsx              # エントリーポイント
 ```
+
+### モジュール設計
+
+**ゲームロジックとUI層の分離**: `src/game/` ディレクトリにビジネスロジックを集約し、`src/components/` にUI層を配置することで、保守性と拡張性を向上させています。
+
+**1ファイル1ロールパターン**: 各ロールは独立したファイルとして管理されており、新しいロールの追加や既存ロールの修正が容易です。ロールファイルを追加し、`roles/index.ts` でエクスポートするだけで新ロールを導入できます。
 
 ## 主要な画面
 
