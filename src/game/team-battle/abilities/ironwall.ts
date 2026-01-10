@@ -31,14 +31,14 @@ export const handleIronwallScoreModifier = (ctx: ScoreModifierContext): ScoreMod
 export const handleIronwallSkill = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs, members } = ctx;
 
-  // Set turns to team member count so effect lasts for all team members
+  // Set turns to team member count + 1 so effect lasts for all team members
   const teamMemberCount = members.filter((m) => m.team === team).length;
 
   const updatedTeamBuffs = {
     A: { ...(teamBuffs.A || {}) },
     B: { ...(teamBuffs.B || {}) },
   };
-  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negHalfTurns: teamMemberCount, negZeroTurns: 0 };
+  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negHalfTurns: teamMemberCount + 1, negZeroTurns: 0 };
 
   return {
     success: true,
@@ -54,14 +54,14 @@ export const handleIronwallSkill = (ctx: AbilityContext): AbilityResult => {
 export const handleIronwallUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, teamBuffs, members } = ctx;
 
-  // Set turns to team member count so effect lasts for all team members
+  // Set turns to team member count + 1 so effect lasts for all team members
   const teamMemberCount = members.filter((m) => m.team === team).length;
 
   const updatedTeamBuffs = {
     A: { ...(teamBuffs.A || {}) },
     B: { ...(teamBuffs.B || {}) },
   };
-  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negZeroTurns: teamMemberCount, negHalfTurns: 0 };
+  updatedTeamBuffs[team] = { ...(teamBuffs[team] || {}), negZeroTurns: teamMemberCount + 1, negHalfTurns: 0 };
 
   return {
     success: true,
