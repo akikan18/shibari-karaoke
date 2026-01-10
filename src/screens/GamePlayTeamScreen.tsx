@@ -63,6 +63,7 @@ import { TargetModal, TargetModalState } from '../components/team-battle/modals/
 import { GuideModal } from '../components/team-battle/modals/GuideModal';
 import { OracleUltPickModal, OracleUltPickState, OracleUltPickItem } from '../components/team-battle/modals/OracleUltPickModal';
 import { MissionDisplay } from '../components/team-battle/MissionDisplay';
+import { ThemeSelectionGrid } from '../components/team-battle/ThemeSelectionGrid';
 
 
 export const GamePlayTeamScreen = () => {
@@ -1825,24 +1826,11 @@ export const GamePlayTeamScreen = () => {
                 <p className="text-yellow-200 font-bold text-sm tracking-widest mt-1 uppercase">PROXY FOR: {proxyTarget.name}</p>
               </div>
 
-              <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
-                <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                  {(proxyTarget.candidates || []).map((cand: any, idx2: number) => (
-                    <motion.button
-                      key={idx2}
-                      whileHover={{ scale: 1.05, borderColor: '#facc15' }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => requestPickCandidate(proxyTarget.id, cand, true)}
-                      disabled={busy || isOraclePickingActive}
-                      className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
-                    >
-                      <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
-                      <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
-                      <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
-                    </motion.button>
-                  ))}
-                </div>
-              </div>
+              <ThemeSelectionGrid
+                candidates={proxyTarget.candidates || []}
+                onSelect={(cand) => requestPickCandidate(proxyTarget.id, cand, true)}
+                disabled={busy || isOraclePickingActive}
+              />
 
               <button onClick={() => setProxyTarget(null)} className="mt-2 px-8 py-2 rounded-lg border border-white/20 hover:bg-white/10 text-gray-400 font-bold text-xs tracking-widest">
                 CANCEL PROXY
@@ -2047,24 +2035,11 @@ export const GamePlayTeamScreen = () => {
                   )}
                 </div>
 
-                <div className="w-full flex-1 overflow-y-auto min-h-0 custom-scrollbar px-1 pb-2 md:overflow-visible md:h-auto">
-                  <div className="flex flex-col md:grid md:grid-cols-3 gap-2 md:gap-4 w-full">
-                    {displayCandidates.map((cand: any, idx2: number) => (
-                      <motion.button
-                        key={`${cardTitle(cand)}-${idx2}`}
-                        whileHover={{ scale: 1.05, borderColor: '#facc15' }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => requestPickCandidate(selectionOwner.id, cand, false)}
-                        disabled={busy || isOraclePickingActive}
-                        className="bg-black/80 backdrop-blur-md border border-white/20 hover:bg-yellow-900/40 p-4 md:p-6 rounded-xl md:rounded-2xl flex flex-col items-center justify-center gap-1 md:gap-2 transition-colors min-h-[100px] md:min-h-[160px] shrink-0 disabled:opacity-50"
-                      >
-                        <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold border border-yellow-500/30 px-2 py-0.5 rounded uppercase">OPTION {idx2 + 1}</div>
-                        <h3 className="font-bold text-white text-base md:text-xl leading-tight break-all">{cardTitle(cand)}</h3>
-                        <p className="text-[10px] md:text-xs text-gray-400 font-mono mt-0.5">{cardCriteria(cand)}</p>
-                      </motion.button>
-                    ))}
-                  </div>
-                </div>
+                <ThemeSelectionGrid
+                  candidates={displayCandidates}
+                  onSelect={(cand) => requestPickCandidate(selectionOwner.id, cand, false)}
+                  disabled={busy || isOraclePickingActive}
+                />
               </motion.div>
             ) : (
               <MissionDisplay
