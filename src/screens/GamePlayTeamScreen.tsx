@@ -53,6 +53,7 @@ import {
   decrementBuffTurns,
   cleanupMemberDebuffs,
 } from '../game/team-battle/resultProcessor';
+import { getAbilityHandler, getPassiveHandler } from '../game/team-battle/abilities';
 
 // --- UI Components ---
 import { ActionOverlay } from '../components/team-battle/overlays/ActionOverlay';
@@ -990,7 +991,7 @@ export const GamePlayTeamScreen = () => {
 
         const teamBuffsTx = normalizeTeamBuffs(data.teamBuffs || { A: {}, B: {} });
 
-        const mems = normalizeMembers(data.members || []);
+        let mems = normalizeMembers(data.members || []);
 
         let idx = data.currentTurnIndex ?? 0;
         if (idx >= mems.length) idx = 0;
@@ -1062,195 +1063,58 @@ export const GamePlayTeamScreen = () => {
           singer.role.ultUses -= 1;
         }
 
-        // ---- NORMAL SKILL ----
-        if (kind === 'skill') {
-          if (r === 'maestro') {
-            singer.buffs.maestroSkill = true;
-            pushLines.push(`SKILL MAESTRO: armed (success COMBO+2 / fail -500)`);
-          } else if (r === 'showman') {
-            singer.buffs.encore = true;
-            pushLines.push(`SKILL SHOWMAN: armed (+500 on success)`);
-          } else if (r === 'gambler') {
-            singer.buffs.doubleDown = true;
-            singer.buffs.gamblerSkillClampPassive = true;
-            pushLines.push(`SKILL GAMBLER: DOUBLE DOWN armed (success x2 / fail -2000) + passive clamp`);
-          } else if (r === 'underdog') {
-            const diff = Math.abs((teamScoresTx.A ?? 0) - (teamScoresTx.B ?? 0));
-            const steal = clamp(Math.round(diff * 0.2), 0, 2000);
-            recordTeam(t, +steal, `UNDERDOG SKILL (steal 20% up to 2000)`);
-            recordTeam(et, -steal, `UNDERDOG SKILL (stolen by TEAM ${t})`);
-            pushLines.push(`SKILL UNDERDOG: steal ${steal} from TEAM ${et}`);
-          } else if (r === 'hype') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id };
-            pushLines.push(`SKILL HYPE: ${target.name} next 2 turns (success +500)`);
-          } else if (r === 'mimic') {
-            singer.buffs.echo = true;
-            pushLines.push(`SKILL MIMIC: ECHO armed (copy 50% last turn delta)`);
-          } else if (r === 'ironwall') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negHalfTurns: 1, negZeroTurns: 0 };
-            pushLines.push(`SKILL IRONWALL: next TEAM ${t} turn negative -50%`);
-          } else if (r === 'coach') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.safe = true;
-            pushLines.push(`SKILL COACH: TIMEOUT -> ${target.name} (SAFE)`);
-          } else if (r === 'saboteur') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== et) return;
-            target.debuffs.sabotaged = { by: singer.id, fail: -1000 };
-            pushLines.push(`SKILL SABOTEUR: sabotaged -> ${target.name} (success +0 / fail -1000)`);
-          } else if (r === 'oracle') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const targetIdx = mems.findIndex((m: any) => m.id === targetId);
-            if (targetIdx === -1) return;
+        // ---- ABILITY HANDLING ----
+        // Use handlers from abilities/
+        const handler = getAbilityHandler(r, kind);
+        if (handler) {
+          const handlerResult = handler({
+            singer,
+            singerId: singer.id,
+            team: t,
+            enemyTeam: et,
+            roleId: r,
+            members: mems,
+            teamBuffs: teamBuffsTx,
+            teamScores: teamScoresTx,
+            deck,
+            pool,
+            kind,
+            targetId: opts.targetId,
+            logs: pushLines,
+            logEntries: entries,
+            rerollThreeChoicesKeepFirst,
+          });
 
-            const target = { ...mems[targetIdx] };
-            if (target.team !== t) return;
-
-            const res = rerollThreeChoicesKeepFirst(target, deck, pool);
-            deck = res.nextDeck;
-            deckChanged = true;
-
-            target.candidates = res.choices;
-            target.challenge = res.current;
-
-            mems[targetIdx] = target;
-            pushLines.push(`SKILL ORACLE: REROLL -> ${target.name} (opt1=current)`);
+          if (handlerResult.success === false) {
+            // Handler returned failure (e.g., invalid target)
+            return;
           }
-        }
 
-        // ---- NORMAL ULT (incl. MIMIC) ----
-        if (kind === 'ult') {
-          if (r === 'maestro') {
-            const combo = singer.combo ?? 0;
-            const gain = combo * 800;
-            recordTeam(t, gain, `MAESTRO ULT (FINALE: combo x800)`);
-            singer.combo = 0;
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), nextSuccessBonus: (teamBuffsTx[t]?.nextSuccessBonus ?? 0) + 500 };
-            pushLines.push(`ULT MAESTRO: FINALE team +${gain}, next success +500`);
-          } else if (r === 'showman') {
-            singer.buffs.spotlight = true;
-            pushLines.push(`ULT SHOWMAN: armed (success enemy -2000)`);
-          } else if (r === 'ironwall') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), negZeroTurns: 1, negHalfTurns: 0 };
-            pushLines.push(`ULT IRONWALL: next TEAM ${t} turn negative -> 0`);
-          } else if (r === 'coach') {
-            const targetId = opts.targetId;
-            if (!targetId) return;
-            const target = mems.find((m: any) => m.id === targetId);
-            if (!target || target.team !== t) return;
-            target.buffs.forcedSuccess = { by: singer.id };
-            pushLines.push(`ULT COACH: ${target.name} next turn FORCED SUCCESS`);
-          } else if (r === 'hype') {
-            teamBuffsTx[t] = { ...(teamBuffsTx[t] || {}), hypeUltTurns: 3 };
-            pushLines.push(`ULT HYPE: allies success +500 for 3 turns`);
-          } else if (r === 'saboteur') {
-            // ✅ FIX: 次の敵1人ではなく「敵全員の次の自分の番」1回分 SEALED
-            teamBuffsTx[et] = {
-              ...(teamBuffsTx[et] || {}),
-              lastTeamDelta: 0,
-              nextSuccessBonus: 0,
-              hypeUltTurns: 0,
-              negHalfTurns: 0,
-              negZeroTurns: 0,
-              sealedTurns: 0,
-            };
-
-            const affected: string[] = [];
-            for (let i = 0; i < mems.length; i++) {
-              if (mems[i]?.team === et) {
-                const name = mems[i]?.name;
-                mems[i] = {
-                  ...mems[i],
-                  buffs: {},
-                  debuffs: { sealedOnce: { by: singer.id, ts: Date.now() } },
-                };
-                if (name) affected.push(name);
-              }
-            }
-
-            pushLines.push(`ULT SABOTEUR: TEAM ${et} effects RESET`);
-            pushLines.push(`ULT SABOTEUR: SEALED (PERSONAL) applied to ALL enemies for their next personal turn`);
-            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
-          } else if (r === 'underdog') {
-            const my = teamScoresTx[t] ?? 0;
-            const opp = teamScoresTx[et] ?? 0;
-
-            if (my < opp) {
-              const targetScore = opp - 2000;
-              const delta = Math.max(0, targetScore - my);
-              if (delta > 0) recordTeam(t, delta, 'UNDERDOG ULT (catch up to opp-2000)');
-              pushLines.push(`ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`);
-            } else {
-              recordTeam(t, 2000, 'UNDERDOG ULT (winning: +2000)');
-              pushLines.push(`ULT UNDERDOG: winning => team +2000`);
-            }
-          } else if (r === 'gambler') {
-            singer.buffs.gamblerUlt = true;
-            pushLines.push(`ULT GAMBLER: coinflip armed (+5000 / -1000)`);
-          } else if (r === 'oracle') {
-            // ✅ FIX: 敵に3択を渡すのはNG -> ORACLE側が敵全員分「自分で選択して確定」する
-            const enemyReady = mems.filter((m: any) => isReadyForTurn(m) && m.team === et);
-            const items: OracleUltPickItem[] = [];
-
-            for (const em of enemyReady) {
-              const cur = em.challenge ?? { title: 'FREE THEME', criteria: '—' };
-              const d2 = drawFromDeck<ThemeCard>(deck, pool, 2);
-              deck = d2.nextDeck;
-              deckChanged = true;
-
-              const extra = d2.choices || [];
-              const choices: ThemeCard[] = [cur, extra[0] ?? { title: 'FREE THEME', criteria: '—' }, extra[1] ?? { title: 'FREE THEME', criteria: '—' }];
-              items.push({ targetId: em.id, targetName: em.name, team: em.team, choices });
-            }
-
-            if (items.length === 0) {
-              pushLines.push(`ULT ORACLE: no enemy targets`);
-            } else {
-              pushLines.push(`ULT ORACLE: choose themes for ALL enemies (enemy cannot choose)`);
-              pushLines.push(`TARGETS: ${items.map((x) => x.targetName).join(', ')}`);
-            }
-
-            const oraclePickState: OracleUltPickState =
-              items.length > 0
-                ? {
-                    active: true,
-                    createdAt: Date.now(),
-                    byId: singer.id,
-                    byName: singer.name,
-                    targetTeam: et,
-                    idx: 0,
-                    items,
-                  }
-                : null;
-
-            (data as any).__oraclePickState = oraclePickState;
-          } else if (r === 'mimic') {
-            // ✅ FIX: MIMIC ULT -> 味方全員の「次の自分のターン」に MIMICパッシブ付与（1ターン）
-            const affected: string[] = [];
-            for (let i = 0; i < mems.length; i++) {
-              if (mems[i]?.team === t) {
-                mems[i] = {
-                  ...mems[i],
-                  buffs: {
-                    ...(mems[i].buffs || {}),
-                    mimicPassiveTurns: Math.max(1, mems[i]?.buffs?.mimicPassiveTurns ?? 0),
-                  },
-                };
-                affected.push(mems[i]?.name);
-              }
-            }
-            pushLines.push(`ULT MIMIC: grant MIMIC PASSIVE to ALL allies for their next personal turn`);
-            if (affected.length) pushLines.push(`AFFECTED: ${affected.join(', ')}`);
+          // Apply handler results
+          if (handlerResult.members) {
+            mems = handlerResult.members;
+          }
+          if (handlerResult.teamBuffs) {
+            Object.assign(teamBuffsTx, handlerResult.teamBuffs);
+          }
+          if (handlerResult.teamScores) {
+            Object.assign(teamScoresTx, handlerResult.teamScores);
+          }
+          if (handlerResult.deck) {
+            deck = handlerResult.deck;
+            deckChanged = true;
+          }
+          if (handlerResult.logs) {
+            pushLines.push(...handlerResult.logs);
+          }
+          if (handlerResult.logEntries) {
+            entries.push(...handlerResult.logEntries);
+          }
+          if (handlerResult.scoreChanges) {
+            scoreChanges.push(...handlerResult.scoreChanges);
+          }
+          if ((handlerResult as any).oraclePickState !== undefined) {
+            (data as any).__oraclePickState = (handlerResult as any).oraclePickState;
           }
         }
 
@@ -1449,52 +1313,33 @@ export const GamePlayTeamScreen = () => {
 
         // Passives / Buffs (disabled if sealed)
         if (!sealedThisTurn && !sabotageActive) {
-          // SHOWMAN passive
-          if (rid === 'showman' && effectiveSuccess) applySingerDelta(500, 'SHOWMAN PASSIVE (+500 on success)');
+          // Use passive handlers
+          if (rid) {
+            const passiveHandler = getPassiveHandler(rid);
+            if (passiveHandler) {
+              const passiveResult = passiveHandler({
+                singer,
+                isSuccess: effectiveSuccess,
+                sealed: sealedThisTurn,
+                sabotaged: sabotageActive,
+                team: t,
+                enemyTeam: et,
+                teamBuffs: teamBuffsTx,
+                notes,
+              });
 
-          // SABOTEUR passive
-          if (rid === 'saboteur' && effectiveSuccess) applyTeamDelta(et, -300, 'SABOTEUR PASSIVE (enemy -300 on success)');
-
-          // MAESTRO passive
-          if (rid === 'maestro') {
-            if (effectiveSuccess) {
-              const nextCombo = clamp((singer.combo ?? 0) + 1, 0, 5);
-              singer.combo = nextCombo;
-              const bonus = 250 * nextCombo;
-              applySingerDelta(bonus, `MAESTRO PASSIVE (COMBO x${nextCombo} => +${bonus})`);
-            } else {
-              const had = singer.combo ?? 0;
-              singer.combo = 0;
-              if (had > 0) notes.push(`NOTE MAESTRO: COMBO broken (no score penalty)`);
-            }
-          }
-
-          // ✅ FIX: GAMBLER passive (success: 0..1000, fail: 0..-1000) step 100
-          if (rid === 'gambler') {
-            const clampFlag = !!singer.buffs?.gamblerSkillClampPassive;
-            if (effectiveSuccess) {
-              const step = 100;
-              const steps = 11; // 0..1000 => 11 values
-              const bonus = step * Math.floor(Math.random() * steps); // 0..1000
-              applySingerDelta(bonus, `GAMBLER PASSIVE (RNG bonus)`);
-            } else {
-              const step = 100;
-              const steps = 11; // 0..-1000 => 11 values
-              const raw = -step * Math.floor(Math.random() * steps); // 0, -100, ..., -1000
-              const applied = clampFlag && raw < 0 ? 0 : raw;
-              if (clampFlag && raw < 0) notes.push(`NOTE GAMBLER SKILL: PASSIVE clamp (${raw} -> 0)`);
-              applySingerDelta(applied, `GAMBLER PASSIVE (RNG penalty)`);
-            }
-          }
-
-          // ✅ FIX: MIMIC passive (self) + shared by MIMIC ULT (buff: mimicPassiveTurns)
-          const mimicSharedTurns = singer.buffs?.mimicPassiveTurns ?? 0;
-          const canUseMimicPassive = rid === 'mimic' || mimicSharedTurns > 0;
-          if (canUseMimicPassive && effectiveSuccess) {
-            const last = teamBuffsTx[t]?.lastTeamDelta ?? 0;
-            if (last > 0) {
-              const bonus = Math.round(last * 0.3);
-              applySingerDelta(bonus, rid === 'mimic' ? `MIMIC PASSIVE (30% of last ally success ${last})` : `MIMIC PASSIVE (shared) (30% of last ally success ${last})`);
+              if (passiveResult.scoreDelta !== undefined && passiveResult.reason) {
+                applySingerDelta(passiveResult.scoreDelta, passiveResult.reason);
+              }
+              if (passiveResult.enemyScoreDelta !== undefined && passiveResult.enemyReason) {
+                applyTeamDelta(et, passiveResult.enemyScoreDelta, passiveResult.enemyReason);
+              }
+              if (passiveResult.notes) {
+                notes.push(...passiveResult.notes);
+              }
+              if (passiveResult.singerUpdates) {
+                Object.assign(singer, passiveResult.singerUpdates);
+              }
             }
           }
 
