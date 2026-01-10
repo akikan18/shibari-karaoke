@@ -1311,6 +1311,36 @@ export const GamePlayTeamScreen = () => {
             }
           }
 
+          // MIMIC shared passive (from MIMIC ULT) - applies to all allies regardless of role
+          if ((singer.buffs?.mimicPassiveTurns ?? 0) > 0 && rid !== 'mimic') {
+            const mimicHandler = getPassiveHandler('mimic');
+            if (mimicHandler) {
+              const mimicResult = mimicHandler({
+                singer,
+                isSuccess: effectiveSuccess,
+                sealed: sealedThisTurn,
+                sabotaged: sabotageActive,
+                team: t,
+                enemyTeam: et,
+                teamBuffs: teamBuffsTx,
+                notes,
+              });
+
+              if (mimicResult.scoreDelta !== undefined && mimicResult.reason) {
+                applySingerDelta(mimicResult.scoreDelta, mimicResult.reason);
+              }
+              if (mimicResult.enemyScoreDelta !== undefined && mimicResult.enemyReason) {
+                applyTeamDelta(et, mimicResult.enemyScoreDelta, mimicResult.enemyReason);
+              }
+              if (mimicResult.notes) {
+                notes.push(...mimicResult.notes);
+              }
+              if (mimicResult.singerUpdates) {
+                Object.assign(singer, mimicResult.singerUpdates);
+              }
+            }
+          }
+
           // TEAM next success bonus
           if (effectiveSuccess && (teamBuffsTx[t]?.nextSuccessBonus ?? 0) > 0) {
             const b = teamBuffsTx[t].nextSuccessBonus;

@@ -7,15 +7,18 @@ export const handleMimicPassive = (ctx: PassiveContext): PassiveResult => {
   const { singer, isSuccess, team, teamBuffs } = ctx;
 
   const mimicSharedTurns = singer.buffs?.mimicPassiveTurns ?? 0;
-  const canUse = singer.role?.id === 'mimic' || mimicSharedTurns > 0;
+  const isMimicRole = singer.role?.id === 'mimic';
+
+  // If MIMIC role has shared passive active, only trigger shared version (not both)
+  const canUse = mimicSharedTurns > 0 || isMimicRole;
 
   if (canUse && isSuccess) {
     const last = teamBuffs[team]?.lastTeamDelta ?? 0;
     if (last > 0) {
       const bonus = Math.round(last * 0.3);
-      const reason = singer.role?.id === 'mimic'
-        ? `MIMIC PASSIVE (30% of last ally success ${last})`
-        : `MIMIC PASSIVE (shared) (30% of last ally success ${last})`;
+      const reason = mimicSharedTurns > 0
+        ? `MIMIC PASSIVE (shared) (30% of last ally success ${last})`
+        : `MIMIC PASSIVE (30% of last ally success ${last})`;
 
       return {
         scoreDelta: bonus,
@@ -48,6 +51,9 @@ export const handleMimicSkill = (ctx: AbilityContext): AbilityResult => {
 export const handleMimicUlt = (ctx: AbilityContext): AbilityResult => {
   const { members, team } = ctx;
 
+  // Set turns to team member count so effect lasts for all team members
+  const teamMemberCount = members.filter((m) => m.team === team).length;
+
   const affected: string[] = [];
   for (let i = 0; i < members.length; i++) {
     if (members[i]?.team === team) {
@@ -55,7 +61,7 @@ export const handleMimicUlt = (ctx: AbilityContext): AbilityResult => {
         ...members[i],
         buffs: {
           ...(members[i].buffs || {}),
-          mimicPassiveTurns: Math.max(1, members[i]?.buffs?.mimicPassiveTurns ?? 0),
+          mimicPassiveTurns: teamMemberCount,
         },
       };
       affected.push(members[i]?.name);

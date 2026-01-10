@@ -37,16 +37,14 @@ export const mitigateNegative = (
 
   let d = delta;
 
-  // ironwall skill/ult mitigation (active only on that team's turn)
-  if (team === currentTeam) {
-    if (negZeroActive) {
-      notes.push(`NOTE TEAM ${team}: IRONWALL ULT -> negative blocked (${fmt(d)}) [${reason}]`);
-      d = 0;
-    } else if (negHalfActive) {
-      const reduced = Math.round(d * 0.5);
-      notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
-      d = reduced;
-    }
+  // ironwall skill/ult mitigation (applies even on enemy turns)
+  if (negZeroActive) {
+    notes.push(`NOTE TEAM ${team}: IRONWALL ULT -> negative blocked (${fmt(d)}) [${reason}]`);
+    d = 0;
+  } else if (negHalfActive) {
+    const reduced = Math.round(d * 0.5);
+    notes.push(`NOTE TEAM ${team}: IRONWALL SKILL -> -50% (${fmt(d)} -> ${fmt(reduced)}) [${reason}]`);
+    d = reduced;
   }
 
   // ironwall passive mitigation (disabled while sealed)
