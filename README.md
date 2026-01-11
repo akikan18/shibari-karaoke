@@ -163,10 +163,11 @@ src/
 - `abilities/` - ロールの能力実装（SKILL/ULT/PASSIVE）
 
 新しいロールの追加は以下の手順で行います:
-1. `roles/newrole.ts` でロール定義を作成（passive/skill/ult説明、tone/desc含む）
-2. `roles/index.ts` の `ALL_ROLES` 配列に追加
-3. `abilities/newrole.ts` でハンドラー関数を実装
-4. `abilities/index.ts` の各レジストリ（PASSIVE_HANDLERS, SKILL_HANDLERS等）に登録
+1. `roles/types.ts` の `RoleId` 型に新しいロールIDを追加
+2. `roles/newrole.ts` でロール定義を作成（passive/skill/ult説明、tone/desc含む）
+3. `roles/index.ts` の `ALL_ROLES` 配列に追加
+4. `abilities/newrole.ts` でハンドラー関数を実装
+5. `abilities/index.ts` の各レジストリ（PASSIVE_HANDLERS, SKILL_HANDLERS等）に登録
 
 **能力ハンドラーパターン**: 全てのロール能力は統一されたインターフェース（`AbilityHandler`, `PassiveHandler`）を実装し、レジストリから取得して実行されます。これにより、メインロジックを変更せずに新しいロールを追加できます。
 
