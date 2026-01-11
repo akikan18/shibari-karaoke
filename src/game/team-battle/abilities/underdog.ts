@@ -3,7 +3,7 @@ import { clamp } from '../utils';
 import type { ScoreChange, TeamId } from '../types';
 
 /**
- * Underdog PASSIVE: +500 when losing at turn start
+ * Underdog PASSIVE: +700 when losing at turn start
  */
 export const handleUnderdogTurnStartPassive = (ctx: TurnStartPassiveContext): TurnStartPassiveResult | null => {
   const { nextSinger, team, teamScores } = ctx;
@@ -13,7 +13,7 @@ export const handleUnderdogTurnStartPassive = (ctx: TurnStartPassiveContext): Tu
     const oppTeam: TeamId = team === 'A' ? 'B' : 'A';
     const oppScore = teamScores[oppTeam];
     if (myScore < oppScore) {
-      return { delta: 500, reason: 'UNDERDOG PASSIVE' };
+      return { delta: 700, reason: 'UNDERDOG PASSIVE' };
     }
   }
 
@@ -57,7 +57,7 @@ export const handleUnderdogSkill = (ctx: AbilityContext): AbilityResult => {
 };
 
 /**
- * Underdog ULT: Choose better option between catching up to opp-2000 or +2000
+ * Underdog ULT: Choose better option between catching up to opp-1000 or +2000
  */
 export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const { team, enemyTeam, teamScores } = ctx;
@@ -66,7 +66,7 @@ export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const oppScore = teamScores[enemyTeam] ?? 0;
 
   // Calculate both options
-  const targetScore = oppScore - 2000;
+  const targetScore = oppScore - 1000;
   const catchUpDelta = targetScore - myScore;
   const flatBonus = 2000;
 
@@ -74,11 +74,11 @@ export const handleUnderdogUlt = (ctx: AbilityContext): AbilityResult => {
   const delta = Math.max(catchUpDelta, flatBonus);
 
   const reason = delta === catchUpDelta
-    ? 'UNDERDOG ULT (catch up to opp-2000)'
+    ? 'UNDERDOG ULT (catch up to opp-1000)'
     : 'UNDERDOG ULT (+2000)';
 
   const logMessage = delta === catchUpDelta
-    ? `ULT UNDERDOG: catch up (to opponent -2000) => +${delta}`
+    ? `ULT UNDERDOG: catch up (to opponent -1000) => +${delta}`
     : `ULT UNDERDOG: +2000`;
 
   const scoreChanges: ScoreChange[] = delta > 0 ? [{
