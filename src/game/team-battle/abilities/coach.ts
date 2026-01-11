@@ -26,7 +26,7 @@ export const handleCoachSkill = (ctx: AbilityContext): AbilityResult => {
     return { success: false, message: 'Invalid target for Coach SKILL' };
   }
 
-  target.buffs.safe = true;
+  target.buffs.coachSkill = true;
 
   return {
     success: true,

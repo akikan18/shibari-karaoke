@@ -24,4 +24,7 @@ export type RoleDef = {
   passive: string;
   skill: string;
   ult: string;
+  // UI Meta
+  tone: string; // Tailwind gradient classes
+  desc: string; // Role description/catchphrase
 };

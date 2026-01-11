@@ -37,7 +37,7 @@ export const handleGamblerPassive = (ctx: PassiveContext): PassiveResult => {
 export const handleGamblerSkill = (ctx: AbilityContext): AbilityResult => {
   const { singer } = ctx;
 
-  singer.buffs.doubleDown = true;
+  singer.buffs.gamblerSkill = true;
   singer.buffs.gamblerSkillClampPassive = true;
 
   return {

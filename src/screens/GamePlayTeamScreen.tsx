@@ -942,10 +942,10 @@ export const GamePlayTeamScreen = () => {
   // Target modal configuration for abilities
   // =========================
   const TARGET_SKILL_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
-    coach: { title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_timeout' },
-    saboteur: { title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_sabotage' },
-    oracle: { title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_reroll' },
-    hype: { title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_boost' },
+    coach: { title: 'COACH SKILL: 味方を選択', mode: 'ally', action: 'coach_skill' },
+    saboteur: { title: 'SABOTEUR SKILL: 敵を選択', mode: 'enemy', action: 'saboteur_skill' },
+    oracle: { title: 'ORACLE SKILL: 自分/味方を選択', mode: 'ally', action: 'oracle_skill' },
+    hype: { title: 'HYPE SKILL: 味方を選択', mode: 'ally', action: 'hype_skill' },
   };
 
   const TARGET_ULT_CONFIG: Record<string, { title: string; mode: 'ally' | 'enemy'; action: TargetModalAction }> = {
@@ -1007,13 +1007,13 @@ export const GamePlayTeamScreen = () => {
     const title = kind === 'ult' ? 'CONFIRM ULT TARGET' : 'CONFIRM SKILL TARGET';
 
     const actionText =
-      action === 'coach_timeout'
+      action === 'coach_skill'
         ? 'TIMEOUT'
         : action === 'coach_ult'
         ? 'FORCE SUCCESS'
-        : action === 'saboteur_sabotage'
+        : action === 'saboteur_skill'
         ? 'SABOTAGE'
-        : action === 'oracle_reroll'
+        : action === 'oracle_skill'
         ? 'REROLL'
         : 'HYPE BOOST';
 

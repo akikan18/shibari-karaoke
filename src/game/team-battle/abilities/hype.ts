@@ -25,7 +25,7 @@ export const handleHypeSkill = (ctx: AbilityContext): AbilityResult => {
     return { success: false, message: 'Invalid target for Hype SKILL' };
   }
 
-  target.buffs.hypeBoost = { value: 500, turns: 2, by: singer.id };
+  target.buffs.hypeSkill = { value: 500, turns: 2, by: singer.id };
 
   return {
     success: true,
